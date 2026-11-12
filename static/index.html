@@ -1,0 +1,469 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MedAlert</title>
+<style>
+  :root {
+    --bg: #f5f7f6; --panel: #fff; --text: #14201b; --muted: #5b6b64; --faint: #93a29b; --border: #dfe6e2;
+    --hover: #eef3f0; --accent: #0f766e; --accent-soft: #e6f4f2; --on-accent: #fff;
+    --crit: #b91c1c; --crit-soft: #fdecec; --high: #c2410c; --high-soft: #fff1e6;
+    --mod: #a16207; --mod-soft: #fdf6e3; --ok: #15803d; --ok-soft: #e8f6ed; --code: #f1f5f3;
+    --shadow: 0 1px 2px rgba(16,24,20,.05), 0 6px 20px rgba(16,24,20,.06);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #0e1412; --panel: #151d1a; --text: #e5ece9; --muted: #9fb0a8; --faint: #6b7c75; --border: #24302b;
+      --hover: #1c2622; --accent: #2dd4bf; --accent-soft: #123430; --on-accent: #062420;
+      --crit: #f87171; --crit-soft: #3a1414; --high: #fb923c; --high-soft: #3a2010;
+      --mod: #facc15; --mod-soft: #33290b; --ok: #4ade80; --ok-soft: #0f2a1a; --code: #1b2420;
+      --shadow: 0 1px 2px rgba(0,0,0,.3), 0 6px 20px rgba(0,0,0,.25);
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #0e1412; --panel: #151d1a; --text: #e5ece9; --muted: #9fb0a8; --faint: #6b7c75; --border: #24302b;
+    --hover: #1c2622; --accent: #2dd4bf; --accent-soft: #123430; --on-accent: #062420;
+    --crit: #f87171; --crit-soft: #3a1414; --high: #fb923c; --high-soft: #3a2010;
+    --mod: #facc15; --mod-soft: #33290b; --ok: #4ade80; --ok-soft: #0f2a1a; --code: #1b2420;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text); font: 15px/1.55 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+  button, input, textarea, select { font: inherit; color: inherit; }
+  button { cursor: pointer; }
+  a { color: var(--accent); }
+  .hidden { display: none !important; }
+  header { background: var(--panel); border-bottom: 1px solid var(--border); position: sticky; top: 0; z-index: 5; }
+  .bar { max-width: 1080px; margin: 0 auto; padding: 12px 16px; display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
+  .brand { display: flex; align-items: center; gap: 9px; font-weight: 700; font-size: 1.08rem; margin-right: auto; }
+  .logo { width: 30px; height: 30px; border-radius: 9px; background: var(--accent); color: var(--on-accent); display: grid; place-items: center; font-weight: 800; }
+  nav { display: flex; gap: 4px; overflow-x: auto; max-width: 100%; }
+  nav button { border: 0; background: none; padding: 7px 12px; border-radius: 9px; color: var(--muted); font-weight: 500; white-space: nowrap; }
+  nav button:hover { background: var(--hover); color: var(--text); }
+  nav button.active { background: var(--accent-soft); color: var(--accent); }
+  nav .n { background: var(--crit); color: #fff; border-radius: 99px; font-size: .72rem; padding: 0 6px; margin-left: 4px; }
+  main { max-width: 1080px; margin: 0 auto; padding: 22px 16px 70px; }
+  h1 { font-size: 1.45rem; margin: 0 0 4px; letter-spacing: -.01em; }
+  h2 { font-size: 1.05rem; margin: 22px 0 10px; }
+  .sub { color: var(--muted); margin: 0 0 18px; }
+  .card { background: var(--panel); border: 1px solid var(--border); border-radius: 14px; padding: 16px; box-shadow: var(--shadow); }
+  .grid { display: grid; gap: 12px; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); }
+  .stat b { display: block; font-size: 1.7rem; line-height: 1.2; }
+  .stat span { color: var(--muted); font-size: .86rem; }
+  .btn { display: inline-flex; align-items: center; gap: 6px; padding: 8px 14px; border-radius: 10px; border: 1px solid var(--border); background: var(--panel); font-weight: 500; }
+  .btn:hover { background: var(--hover); }
+  .btn.primary { background: var(--accent); color: var(--on-accent); border-color: var(--accent); }
+  .btn.danger:hover { color: var(--crit); border-color: var(--crit); }
+  .btn:disabled { opacity: .5; cursor: not-allowed; }
+  .row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+  input[type=text], input[type=password], input[type=number], textarea, select {
+    padding: 8px 11px; border: 1px solid var(--border); border-radius: 10px; background: var(--panel); min-width: 0; }
+  textarea { width: 100%; resize: vertical; }
+  .muted { color: var(--muted); } .small { font-size: .85rem; }
+  .err { color: var(--crit); font-size: .9rem; margin-top: 8px; min-height: 1.2em; }
+  .badge { display: inline-block; padding: 2px 9px; border-radius: 99px; font-size: .75rem; font-weight: 700; letter-spacing: .02em; }
+  .CRITICAL { background: var(--crit-soft); color: var(--crit); }
+  .HIGH { background: var(--high-soft); color: var(--high); }
+  .MODERATE, .MEDIUM { background: var(--mod-soft); color: var(--mod); }
+  .LOW { background: var(--hover); color: var(--muted); }
+  .confirmed { background: var(--crit-soft); color: var(--crit); } .dismissed { background: var(--ok-soft); color: var(--ok); }
+  .new { background: var(--accent-soft); color: var(--accent); }
+  .alert { margin-bottom: 12px; border-left: 4px solid var(--border); }
+  .alert.sev-CRITICAL { border-left-color: var(--crit); } .alert.sev-HIGH { border-left-color: var(--high); }
+  .alert.sev-MODERATE { border-left-color: var(--mod); }
+  .alert h3 { margin: 6px 0 4px; font-size: 1.02rem; }
+  .kv { display: grid; grid-template-columns: max-content 1fr; gap: 2px 12px; font-size: .88rem; margin: 10px 0; }
+  .kv dt { color: var(--faint); } .kv dd { margin: 0; overflow-wrap: anywhere; }
+  details { margin-top: 8px; } summary { cursor: pointer; color: var(--accent); font-size: .9rem; }
+  pre { white-space: pre-wrap; background: var(--code); border-radius: 10px; padding: 10px 12px; font-size: .84rem; margin: 8px 0 0; overflow-wrap: anywhere; }
+  .table-wrap { overflow-x: auto; border: 1px solid var(--border); border-radius: 12px; background: var(--panel); }
+  table { border-collapse: collapse; width: 100%; font-size: .88rem; }
+  th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--border); vertical-align: top; }
+  th { color: var(--muted); font-weight: 600; background: var(--hover); white-space: nowrap; }
+  tr:last-child td { border-bottom: 0; }
+  .log { font: 12.5px/1.5 ui-monospace, Consolas, monospace; background: var(--code); border-radius: 10px; padding: 10px; max-height: 300px; overflow: auto; white-space: pre-wrap; }
+  .empty { color: var(--muted); text-align: center; padding: 26px 10px; }
+  .disclaimer { color: var(--faint); font-size: .8rem; margin-top: 30px; text-align: center; }
+  .icon-btn { border: 1px solid var(--border); background: var(--panel); border-radius: 9px; width: 34px; height: 34px; display: grid; place-items: center; }
+</style>
+</head>
+<body>
+<header>
+  <div class="bar">
+    <div class="brand"><div class="logo">Rx</div>MedAlert</div>
+    <nav id="nav">
+      <button data-tab="overview" class="active">Overview</button>
+      <button data-tab="alerts">Alerts <span class="n hidden" id="navAlerts"></span></button>
+      <button data-tab="inventory">Inventory</button>
+      <button data-tab="lists">CDSCO lists</button>
+      <button data-tab="check">Check a medicine</button>
+      <button data-tab="activity">Activity</button>
+    </nav>
+    <input id="code" type="password" placeholder="Access code" class="hidden" style="width:140px" aria-label="Access code">
+    <button class="icon-btn" id="themeBtn" title="Light/dark" aria-label="Toggle theme"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/></svg></button>
+  </div>
+</header>
+
+<main>
+  <!-- OVERVIEW -->
+  <section id="tab-overview">
+    <h1>Substandard-medicine alerts</h1>
+    <p class="sub">Every month CDSCO publishes medicines that failed quality tests. MedAlert reads those lists,
+      checks them against your stock, and asks a pharmacist to confirm each alert.</p>
+    <div class="grid" id="stats"></div>
+    <div class="row" style="margin-top:16px">
+      <button class="btn primary" id="checkBtn">Check CDSCO now</button>
+      <button class="btn" id="recheckBtn">Re-check stored lists</button>
+      <span class="muted small" id="checkStatus"></span>
+    </div>
+    <div class="err" id="ovErr"></div>
+    <h2>Open alerts</h2>
+    <div id="ovAlerts"></div>
+    <p class="muted small" id="aiInfo"></p>
+  </section>
+
+  <!-- ALERTS -->
+  <section id="tab-alerts" class="hidden">
+    <h1>Alerts</h1>
+    <p class="sub">Confirm an alert after checking the pack (then quarantine and return the stock), or dismiss it if it isn't your batch.</p>
+    <div class="row" style="margin-bottom:14px">
+      <select id="alertFilter" aria-label="Filter alerts">
+        <option value="new">Open</option><option value="confirmed">Confirmed</option>
+        <option value="dismissed">Dismissed</option><option value="">All</option>
+      </select>
+    </div>
+    <div id="alertList"></div>
+  </section>
+
+  <!-- INVENTORY -->
+  <section id="tab-inventory" class="hidden">
+    <h1>Inventory</h1>
+    <p class="sub">The medicines you hold. Add the <b>manufacturer and batch number</b> for precise matches -
+      without them MedAlert can only say "same drug name, check the pack".</p>
+    <div class="card">
+      <div class="row">
+        <input type="text" id="iName" placeholder="Medicine name and strength *" style="flex:2;min-width:200px">
+        <input type="text" id="iMaker" placeholder="Manufacturer" style="flex:1;min-width:150px">
+        <input type="text" id="iBatch" placeholder="Batch no." style="width:120px">
+        <input type="text" id="iExpiry" placeholder="Expiry (YYYY-MM)" style="width:140px">
+        <input type="number" id="iQty" placeholder="Qty" style="width:80px" min="0">
+        <input type="text" id="iLoc" placeholder="Location" style="width:120px">
+        <button class="btn primary" id="addItem">Add</button>
+      </div>
+      <div class="row" style="margin-top:10px">
+        <label class="btn">Import CSV <input type="file" id="csvFile" accept=".csv,text/csv" hidden></label>
+        <a class="small" href="/static/inventory_template.csv" download>CSV template</a>
+      </div>
+      <div class="err" id="invErr"></div>
+    </div>
+    <h2>Stock <span class="muted small" id="invCount"></span></h2>
+    <div class="table-wrap"><table><thead><tr><th>Medicine</th><th>Manufacturer</th><th>Batch</th><th>Expiry</th><th>Qty</th><th>Location</th><th></th></tr></thead>
+      <tbody id="invRows"></tbody></table></div>
+  </section>
+
+  <!-- LISTS -->
+  <section id="tab-lists" class="hidden">
+    <h1>CDSCO lists</h1>
+    <p class="sub">Not of Standard Quality (NSQ) and spurious-drug lists. MedAlert downloads new ones daily;
+      if the CDSCO site blocks the server, download the PDF from
+      <a href="https://cdsco.gov.in/opencms/opencms/en/Alerts/" target="_blank" rel="noopener">cdsco.gov.in → Alerts</a> and upload it here.</p>
+    <div class="card row">
+      <label class="btn primary">Upload a CDSCO PDF <input type="file" id="pdfFile" accept="application/pdf" hidden></label>
+      <span class="muted small" id="pdfStatus"></span>
+    </div>
+    <div class="err" id="listErr"></div>
+    <h2>Stored lists</h2>
+    <div class="table-wrap"><table><thead><tr><th>Month</th><th>Title</th><th>Type</th><th>Entries</th><th></th></tr></thead>
+      <tbody id="listRows"></tbody></table></div>
+    <div id="entriesBox" class="hidden" style="margin-top:16px">
+      <div class="row"><h2 id="entriesTitle" style="margin:0;flex:1"></h2><input type="text" id="entriesFilter" placeholder="Filter"></div>
+      <div class="table-wrap" style="margin-top:8px"><table><thead><tr><th>#</th><th>Product</th><th>Batch</th><th>Mfg</th><th>Expiry</th><th>Manufacturer</th><th>Failed test</th><th>Reported by</th></tr></thead>
+        <tbody id="entryRows"></tbody></table></div>
+    </div>
+  </section>
+
+  <!-- CHECK A MEDICINE (public) -->
+  <section id="tab-check" class="hidden">
+    <h1>Check a medicine</h1>
+    <p class="sub">Look up a medicine you have at home or in your pharmacy. Search by batch number (printed on the strip or box) for an exact answer.</p>
+    <div class="card row">
+      <input type="text" id="qName" placeholder="Medicine name, e.g. Paracetamol 500" style="flex:2;min-width:200px">
+      <input type="text" id="qBatch" placeholder="Batch no. (optional)" style="flex:1;min-width:140px">
+      <button class="btn primary" id="qGo">Check</button>
+    </div>
+    <div class="err" id="qErr"></div>
+    <div id="qResults" style="margin-top:14px"></div>
+  </section>
+
+  <!-- ACTIVITY -->
+  <section id="tab-activity" class="hidden">
+    <h1>Activity</h1>
+    <p class="sub">Each check: which agents ran and what they found.</p>
+    <div id="runList"></div>
+  </section>
+
+  <p class="disclaimer">MedAlert is a student project using public CDSCO data. It supports, and never replaces, a pharmacist's judgement.
+    Always verify against the official CDSCO list before acting.</p>
+</main>
+
+<script>
+const $ = id => document.getElementById(id);
+const store = { get: k => { try { return localStorage.getItem(k) || ""; } catch { return ""; } },
+                set: (k, v) => { try { localStorage.setItem(k, v); } catch {} } };
+let cfg = {}, pollTimer = null;
+
+// ---------- theme ----------
+if (store.get("theme")) document.documentElement.dataset.theme = store.get("theme");
+$("themeBtn").onclick = () => {
+  const dark = document.documentElement.dataset.theme === "dark" ||
+    (!document.documentElement.dataset.theme && matchMedia("(prefers-color-scheme: dark)").matches);
+  document.documentElement.dataset.theme = dark ? "light" : "dark"; store.set("theme", dark ? "light" : "dark");
+};
+
+// ---------- api ----------
+async function api(path, opts = {}) {
+  const r = await fetch(path, { ...opts, headers: { "X-Access-Code": $("code").value || store.get("code"), ...(opts.headers || {}) } });
+  const data = await r.json().catch(() => ({}));
+  if (r.status === 401) { $("code").classList.remove("hidden"); $("code").focus(); throw new Error("Enter the access code (top right)."); }
+  if (!r.ok) throw new Error(typeof data.detail === "string" ? data.detail : `Request failed (${r.status})`);
+  return data;
+}
+const json = body => ({ method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+$("code").value = store.get("code");
+$("code").addEventListener("change", () => { store.set("code", $("code").value); refresh(); });
+
+function el(tag, attrs = {}, ...kids) {
+  const e = document.createElement(tag);
+  for (const [k, v] of Object.entries(attrs)) { if (k === "class") e.className = v; else if (k.startsWith("on")) e[k] = v; else e.setAttribute(k, v); }
+  for (const k of kids) if (k != null) e.append(k);
+  return e;
+}
+const fmt = ts => ts ? new Date(ts * 1000).toLocaleString([], { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" }) : "";
+const kindName = k => ({ central_nsq: "NSQ (CDSCO labs)", state_nsq: "NSQ (state labs)", spurious: "Spurious", other: "Other" }[k] || k);
+
+// ---------- tabs ----------
+document.querySelectorAll("#nav button").forEach(b => b.onclick = () => show(b.dataset.tab));
+function show(tab) {
+  document.querySelectorAll("#nav button").forEach(b => b.classList.toggle("active", b.dataset.tab === tab));
+  document.querySelectorAll("main > section").forEach(s => s.classList.toggle("hidden", s.id !== `tab-${tab}`));
+  location.hash = tab;
+  ({ overview: loadOverview, alerts: loadAlerts, inventory: loadInventory, lists: loadLists, activity: loadRuns }[tab] || (() => {}))();
+}
+
+// ---------- overview ----------
+async function loadOverview() {
+  $("ovErr").textContent = "";
+  try {
+    const [inv, lists, open, all] = await Promise.all([api("/api/inventory"), api("/api/lists"), api("/api/alerts?status=new"), api("/api/alerts")]);
+    const crit = open.filter(a => (a.draft || {}).severity === "CRITICAL").length;
+    $("stats").innerHTML = "";
+    [[open.length, "open alerts"], [crit, "critical"], [all.filter(a => a.status === "confirmed").length, "confirmed"],
+     [inv.length, "medicines in stock"], [lists.length, "CDSCO lists stored"],
+     [lists.reduce((s, l) => s + (l.n_entries || 0), 0), "failed batches known"]]
+      .forEach(([n, label]) => $("stats").append(el("div", { class: "card stat" }, el("b", {}, String(n)), el("span", {}, label))));
+    open.sort(bySeverity);
+    $("ovAlerts").innerHTML = "";
+    if (!open.length) $("ovAlerts").append(el("div", { class: "card empty" }, inv.length ? "No open alerts. Your stock is clear of the stored lists." : "Add your medicines on the Inventory page to start."));
+    open.slice(0, 5).forEach(a => $("ovAlerts").append(alertCard(a, true)));
+    if (open.length > 5) $("ovAlerts").append(el("button", { class: "btn", onclick: () => show("alerts") }, `See all ${open.length} alerts`));
+    setNavCount(open.length);
+  } catch (e) { $("ovErr").textContent = e.message; }
+}
+function setNavCount(n) { $("navAlerts").textContent = n; $("navAlerts").classList.toggle("hidden", !n); }
+
+async function startCheck(source) {
+  $("ovErr").textContent = "";
+  try { await api(`/api/check?source=${source}`, { method: "POST" }); watchRun(); }
+  catch (e) { $("ovErr").textContent = e.message; }
+}
+$("checkBtn").onclick = () => startCheck("cdsco");
+$("recheckBtn").onclick = () => startCheck("none");
+
+async function watchRun() {
+  clearTimeout(pollTimer);
+  $("checkBtn").disabled = $("recheckBtn").disabled = true;
+  $("checkStatus").textContent = "Checking… the agents are at work";
+  try {
+    const c = await api("/api/config");
+    if (c.check_running) { pollTimer = setTimeout(watchRun, 2000); return; }
+    const runs = await api("/api/runs");
+    $("checkStatus").textContent = runs[0] ? `Last check ${fmt(runs[0].started)}: ${runs[0].summary || runs[0].status}` : "";
+  } catch (e) { $("checkStatus").textContent = e.message; }
+  $("checkBtn").disabled = $("recheckBtn").disabled = false;
+  loadOverview();
+}
+
+// ---------- alerts ----------
+$("alertFilter").onchange = loadAlerts;
+async function loadAlerts() {
+  $("alertList").innerHTML = "";
+  try {
+    const list = (await api(`/api/alerts${$("alertFilter").value ? "?status=" + $("alertFilter").value : ""}`)).sort(bySeverity);
+    if (!list.length) $("alertList").append(el("div", { class: "card empty" }, "No alerts here."));
+    list.forEach(a => $("alertList").append(alertCard(a, false)));
+  } catch (e) { $("alertList").append(el("div", { class: "err" }, e.message)); }
+}
+const SEV = { CRITICAL: 0, HIGH: 1, MODERATE: 2, LOW: 3 }, LVL = { HIGH: 0, MEDIUM: 1, LOW: 2 };
+function bySeverity(a, b) {
+  return (SEV[(a.draft || {}).severity] ?? 9) - (SEV[(b.draft || {}).severity] ?? 9) || LVL[a.level] - LVL[b.level] || b.created - a.created;
+}
+function alertCard(a, compact) {
+  const d = a.draft || {}, inv = a.inventory || {}, en = a.entry || {}, rv = a.review || {};
+  const levelText = { HIGH: "Batch match", MEDIUM: "Same product – check batch", LOW: "Possible – check pack" }[a.level] || a.level;
+  const card = el("div", { class: `card alert sev-${d.severity || ""}` },
+    el("div", { class: "row" }, el("span", { class: `badge ${d.severity || "LOW"}` }, d.severity || "—"),
+      el("span", { class: `badge ${a.level}` }, levelText), el("span", { class: `badge ${a.status}` }, a.status),
+      el("span", { class: "muted small", style: "margin-left:auto" }, fmt(a.created))),
+    el("h3", {}, `${inv.name}${inv.batch ? " · batch " + inv.batch : ""}`),
+    el("div", {}, d.summary || a.why));
+  if (!compact) {
+    const kv = el("dl", { class: "kv" });
+    [["Listed product", en.drug_name], ["Listed batch", en.batch], ["Manufacturer", en.manufacturer],
+     ["Failed test", en.result], ["Reported by", en.reported_by], ["Expiry", en.exp_date], ["List", a.list_title],
+     ["Why matched", a.why], ["Your stock", `${inv.quantity || 0} at ${inv.location || "—"}`]]
+      .forEach(([k, v]) => { if (v) kv.append(el("dt", {}, k), el("dd", {}, v)); });
+    card.append(kv);
+    if ((d.actions || []).length) { const ul = el("ol", { class: "small" }); d.actions.forEach(s => ul.append(el("li", {}, s))); card.append(el("b", { class: "small" }, "Recommended actions"), ul); }
+    if (rv.decision) {
+      const det = el("details", {}, el("summary", {}, `AI review (AutoGen): ${rv.decision}`));
+      (rv.reasons || []).forEach(r => det.append(el("div", { class: "small" }, "• " + r)));
+      if (rv.transcript) det.append(el("pre", {}, rv.transcript));
+      card.append(det);
+    }
+    if (d.supplier_note) {
+      const det = el("details", {}, el("summary", {}, cfg.ai_enabled ? "Note to supplier (drafted by the CrewAI crew)" : "Note to supplier (template)"), el("pre", {}, d.supplier_note),
+        el("button", { class: "btn", style: "margin-top:8px", onclick: e => { navigator.clipboard.writeText(d.supplier_note); e.target.textContent = "Copied"; } }, "Copy"));
+      card.append(det);
+    }
+    if (a.note) card.append(el("div", { class: "small muted", style: "margin-top:8px" }, `Pharmacist note: ${a.note}`));
+  }
+  const note = el("input", { type: "text", placeholder: "Note (e.g. batch checked, returned)", style: "flex:1;min-width:180px" });
+  const decide = async status => {
+    try { await api(`/api/alerts/${a.id}/decide`, json({ status, note: note.value })); compact ? loadOverview() : loadAlerts(); refreshCount(); }
+    catch (e) { alert(e.message); }
+  };
+  if (a.status === "new") card.append(el("div", { class: "row", style: "margin-top:12px" }, note,
+    el("button", { class: "btn primary", onclick: () => decide("confirmed") }, "Confirm – it's our batch"),
+    el("button", { class: "btn", onclick: () => decide("dismissed") }, "Dismiss – not ours")));
+  else card.append(el("div", { class: "row", style: "margin-top:10px" }, el("button", { class: "btn", onclick: () => decide("new") }, "Reopen")));
+  if (compact) card.append(el("button", { class: "btn", style: "margin-top:8px", onclick: () => show("alerts") }, "Details"));
+  return card;
+}
+async function refreshCount() { try { setNavCount((await api("/api/alerts?status=new")).length); } catch {} }
+
+// ---------- inventory ----------
+async function loadInventory() {
+  $("invErr").textContent = "";
+  try {
+    const items = await api("/api/inventory");
+    $("invCount").textContent = `(${items.length})`;
+    $("invRows").innerHTML = "";
+    if (!items.length) $("invRows").append(el("tr", {}, el("td", { colspan: 7, class: "empty" }, "No medicines yet. Add one above or import a CSV.")));
+    items.forEach(i => $("invRows").append(el("tr", {}, el("td", {}, i.name), el("td", {}, i.manufacturer || el("span", { class: "muted" }, "—")),
+      el("td", {}, i.batch || el("span", { class: "muted" }, "—")), el("td", {}, i.expiry), el("td", {}, String(i.quantity)), el("td", {}, i.location),
+      el("td", {}, el("button", { class: "btn danger", onclick: async () => { if (confirm(`Remove ${i.name}?`)) { await api(`/api/inventory/${i.id}`, { method: "DELETE" }); loadInventory(); } } }, "Remove")))));
+  } catch (e) { $("invErr").textContent = e.message; }
+}
+$("addItem").onclick = async () => {
+  $("invErr").textContent = "";
+  try {
+    await api("/api/inventory", json({ name: $("iName").value.trim(), manufacturer: $("iMaker").value.trim(), batch: $("iBatch").value.trim(),
+      expiry: $("iExpiry").value.trim(), quantity: +$("iQty").value || 0, location: $("iLoc").value.trim() }));
+    ["iName", "iMaker", "iBatch", "iExpiry", "iQty", "iLoc"].forEach(id => $(id).value = "");
+    loadInventory();
+  } catch (e) { $("invErr").textContent = e.message.includes("422") ? "Enter at least the medicine name." : e.message; }
+};
+$("csvFile").onchange = async e => {
+  const f = e.target.files[0]; if (!f) return;
+  try { const r = await api("/api/inventory/csv", { method: "POST", headers: { "Content-Type": "text/csv" }, body: await f.text() });
+    $("invErr").textContent = `Imported ${r.added} medicines${r.skipped ? `, skipped ${r.skipped} bad rows` : ""}. Run "Re-check stored lists" on Overview.`; loadInventory(); }
+  catch (err) { $("invErr").textContent = err.message; }
+  e.target.value = "";
+};
+
+// ---------- lists ----------
+async function loadLists() {
+  $("listErr").textContent = "";
+  try {
+    const lists = await api("/api/lists");
+    $("listRows").innerHTML = "";
+    if (!lists.length) $("listRows").append(el("tr", {}, el("td", { colspan: 5, class: "empty" }, "No lists yet. Click “Check CDSCO now” on Overview or upload a PDF.")));
+    lists.forEach(l => $("listRows").append(el("tr", {}, el("td", {}, l.month || "—"), el("td", {}, l.title), el("td", {}, kindName(l.kind)), el("td", {}, String(l.n_entries)),
+      el("td", {}, el("div", { class: "row" }, el("button", { class: "btn", onclick: () => showEntries(l) }, "View"),
+        el("button", { class: "btn danger", onclick: async () => { if (confirm("Delete this list?")) { await api(`/api/lists/${l.id}`, { method: "DELETE" }); loadLists(); } } }, "Delete"))))));
+  } catch (e) { $("listErr").textContent = e.message; }
+}
+let entries = [];
+async function showEntries(l) {
+  entries = await api(`/api/lists/${l.id}/entries`);
+  $("entriesTitle").textContent = `${l.title} (${entries.length})`; $("entriesBox").classList.remove("hidden"); $("entriesFilter").value = ""; renderEntries();
+  $("entriesBox").scrollIntoView({ behavior: "smooth" });
+}
+$("entriesFilter").oninput = renderEntries;
+function renderEntries() {
+  const q = $("entriesFilter").value.toLowerCase();
+  $("entryRows").innerHTML = "";
+  entries.filter(e => !q || JSON.stringify(e).toLowerCase().includes(q)).forEach(e => $("entryRows").append(el("tr", {},
+    ...[e.sno, e.drug_name, e.batch, e.mfg_date, e.exp_date, e.manufacturer, e.result, e.reported_by].map(v => el("td", {}, String(v ?? ""))))));
+}
+$("pdfFile").onchange = async e => {
+  const f = e.target.files[0]; if (!f) return;
+  $("pdfStatus").textContent = "Reading the PDF…"; $("listErr").textContent = "";
+  try {
+    const r = await api(`/api/lists/upload?title=${encodeURIComponent(f.name.replace(/\.pdf$/i, ""))}`, { method: "POST", headers: { "Content-Type": "application/pdf" }, body: f });
+    $("pdfStatus").textContent = r.status === "duplicate" ? "This list was already imported." : `Imported ${r.entries} entries (${kindName(r.kind)} ${r.month || ""}). Checking your stock…`;
+    loadLists(); if (r.status === "imported") watchRun();
+  } catch (err) { $("pdfStatus").textContent = ""; $("listErr").textContent = err.message; }
+  e.target.value = "";
+};
+
+// ---------- public check ----------
+$("qGo").onclick = runSearch;
+["qName", "qBatch"].forEach(id => $(id).addEventListener("keydown", e => { if (e.key === "Enter") runSearch(); }));
+async function runSearch() {
+  $("qErr").textContent = ""; $("qResults").innerHTML = "";
+  try {
+    const res = await api(`/api/search?name=${encodeURIComponent($("qName").value)}&batch=${encodeURIComponent($("qBatch").value)}`);
+    if (!res.length) { $("qResults").append(el("div", { class: "card empty" }, $("qBatch").value ? "✓ This batch is not on any stored CDSCO list." : "No similar medicine on the stored lists. Add the batch number for an exact check.")); return; }
+    const exact = res.some(r => r.score === 1 && $("qBatch").value);
+    $("qResults").append(el("div", { class: `card ${exact ? "alert sev-CRITICAL" : ""}`, style: "margin-bottom:12px" },
+      exact ? "⚠ This batch appears on a CDSCO list. Don't use it - show it to your pharmacist or doctor."
+            : "These listed batches have a similar name. Compare the batch number on your pack - only that exact batch is affected."));
+    res.forEach(r => $("qResults").append(el("div", { class: "card", style: "margin-bottom:8px" },
+      el("div", { class: "row" }, el("b", {}, r.drug_name), el("span", { class: "badge LOW" }, kindName(r.list_kind)), el("span", { class: "muted small" }, r.list_month)),
+      el("div", { class: "small" }, `Batch ${r.batch} · ${r.manufacturer.split(",")[0]} · failed: ${r.result}`))));
+  } catch (e) { $("qErr").textContent = e.message; }
+}
+
+// ---------- activity ----------
+async function loadRuns() {
+  $("runList").innerHTML = "";
+  try {
+    const runs = await api("/api/runs");
+    if (!runs.length) $("runList").append(el("div", { class: "card empty" }, "No checks yet."));
+    runs.forEach(r => {
+      const det = el("details", {}, el("summary", {}, "Agent log"),
+        el("div", { class: "log" }, r.log.map(l => `${l.t} [${l.tag}] ${l.msg}`).join("\n")));
+      $("runList").append(el("div", { class: "card", style: "margin-bottom:10px" },
+        el("div", { class: "row" }, el("b", {}, fmt(r.started)), el("span", { class: `badge ${r.status === "done" ? "dismissed" : r.status === "error" ? "confirmed" : "new"}` }, r.status),
+          el("span", { class: "muted" }, r.summary || "")), det));
+    });
+  } catch (e) { $("runList").append(el("div", { class: "err" }, e.message)); }
+}
+
+// ---------- start ----------
+async function refresh() {
+  try {
+    cfg = await api("/api/config");
+    if (cfg.access_code_required) $("code").classList.remove("hidden");
+    $("aiInfo").textContent = (cfg.ai_enabled ? `AI review: ${cfg.model}${cfg.backup_model ? ` (backup ${cfg.backup_model})` : ""}` : "AI review is off (no LLM_API_KEY): uncertain matches are marked for manual checking.")
+      + ` · Storage: ${cfg.storage === "permanent" ? "permanent (database)" : "temporary (cleared when the server restarts)"}`;
+    if (cfg.check_running) watchRun();
+  } catch {}
+  const tab = location.hash.slice(1);
+  show(["overview", "alerts", "inventory", "lists", "check", "activity"].includes(tab) ? tab : "overview");
+}
+refresh();
+</script>
+</body>
+</html>

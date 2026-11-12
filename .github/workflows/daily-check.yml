@@ -1,0 +1,33 @@
+# Runs the medicine check every day, even when nobody visits the website.
+# (Free hosts like Render put the site to sleep; this request wakes it up.)
+#
+# One-time setup: GitHub repo -> Settings -> Secrets and variables -> Actions:
+#   Secret SITE_URL     e.g. https://medicine-alert-agent.onrender.com
+#   Secret CHECK_TOKEN  the same value as CHECK_TOKEN in Render's environment
+# Until both are set, this workflow just prints a notice and succeeds.
+name: Daily medicine check
+
+on:
+  schedule:
+    - cron: "30 4 * * *"   # 04:30 UTC = 10:00 IST, every day
+  workflow_dispatch:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Wake the site and start a check
+        env:
+          SITE_URL: ${{ secrets.SITE_URL }}
+          CHECK_TOKEN: ${{ secrets.CHECK_TOKEN }}
+        run: |
+          if [ -z "$SITE_URL" ] || [ -z "$CHECK_TOKEN" ]; then
+            echo "::notice::Skipped: add the SITE_URL and CHECK_TOKEN secrets to enable the daily check."
+            exit 0
+          fi
+          for i in 1 2 3 4 5 6; do
+            if curl -fsS --max-time 60 "$SITE_URL/healthz"; then break; fi
+            echo "site waking up... ($i)"; sleep 20
+          done
+          curl -fsS --max-time 60 -X POST -H "X-Check-Token: $CHECK_TOKEN" "$SITE_URL/api/check?source=cdsco"
+          echo; echo "Check started."

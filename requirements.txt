@@ -1,0 +1,24 @@
+# Python 3.10 - 3.13 (crewai does not support 3.14 yet)
+
+# --- Orchestrator ---
+langgraph==1.2.20
+langgraph-checkpoint==4.3.1
+
+# --- Alert-drafting crew (CrewAI; uses its native OpenAI-compatible provider) ---
+crewai==1.15.37
+
+# --- Match-review debate (AutoGen agentchat v0.4+ API, not legacy pyautogen) ---
+autogen-agentchat==0.7.5
+autogen-core==0.7.5
+autogen-ext[openai]==0.7.5
+
+# --- PDF reading (CDSCO lists are text PDFs: read exactly, no AI) ---
+pdfplumber==0.11.7
+pdfminer.six==20250506
+
+# --- Website + database ---
+fastapi==0.162.2
+uvicorn==0.54.0
+psycopg[binary]==3.3.8      # only used when DATABASE_URL is set (permanent storage)
+python-dotenv==1.2.4
+pydantic==2.12.5
