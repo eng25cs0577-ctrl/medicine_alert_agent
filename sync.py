@@ -17,8 +17,11 @@ SITE_URL / CHECK_TOKEN, or the file sync.env next to this script.
 from __future__ import annotations
 
 import argparse
+import html as htmllib
+from http.cookiejar import CookieJar
 import json
 import os
+import re
 import ssl
 import sys
 import time
@@ -114,24 +117,87 @@ def wake_site(cfg: dict) -> None:
     raise SystemExit(f"Your website {cfg['site']} did not answer. Check the address and that Render shows Live.")
 
 
-def cdsco_get(url: str, insecure: bool) -> bytes:
-    context = None
-    if insecure:   # only for public CDSCO files, and only when you pass --insecure-cdsco
-        context = ssl.create_default_context()
-        context.check_hostname = False
-        context.verify_mode = ssl.CERT_NONE
-    code, body = http(url, timeout=90, context=context)
-    if code != 200:
-        raise OSError(f"HTTP {code}")
-    return body
+class CDSCOClient:
+    """Talks to CDSCO the way a browser does: keeps the session cookie from the Alerts
+    page, sends a Referer, and follows a redirect page that wraps the PDF."""
+
+    def __init__(self, insecure: bool = False) -> None:
+        handlers: list = [urllib.request.HTTPCookieProcessor(CookieJar())]
+        if insecure:   # only for public CDSCO files, and only when you pass --insecure-cdsco
+            context = ssl.create_default_context()
+            context.check_hostname = False
+            context.verify_mode = ssl.CERT_NONE
+            handlers.append(urllib.request.HTTPSHandler(context=context))
+        self.opener = urllib.request.build_opener(*handlers)
+        self.referer = ""
+
+    def get(self, url: str, accept: str = "*/*") -> tuple[bytes, str]:
+        headers = {"User-Agent": USER_AGENT, "Accept": accept, "Accept-Language": "en-IN,en;q=0.9"}
+        if self.referer:
+            headers["Referer"] = self.referer
+        try:
+            with self.opener.open(urllib.request.Request(url, headers=headers), timeout=90) as r:
+                return r.read(), r.headers.get("Content-Type", "")
+        except urllib.error.HTTPError as e:
+            raise OSError(f"HTTP {e.code}") from e
+
+    def page(self, url: str) -> str:
+        body, _ = self.get(url, "text/html,application/xhtml+xml,*/*;q=0.8")
+        self.referer = url
+        return body.decode("utf-8", "replace")
+
+    def pdf(self, url: str) -> tuple[bytes | None, str, bytes]:
+        """Return (pdf or None, content type, what was received)."""
+        body, ctype = self.get(url, "application/pdf,*/*;q=0.8")
+        for _ in range(2):                       # up to two wrapper pages
+            if body.lstrip()[:5] == b"%PDF-" or body.startswith(b"%PDF"):
+                return body, ctype, body
+            nxt = inner_pdf_link(body.decode("utf-8", "replace"), url)
+            if not nxt:
+                break
+            url = nxt
+            body, ctype = self.get(url, "application/pdf,*/*;q=0.8")
+        return None, ctype, body
+
+
+def inner_pdf_link(page: str, base: str) -> str | None:
+    """A page that wraps the file: meta refresh, iframe/embed/object, or a .pdf link."""
+    patterns = [r'http-equiv=["\']?refresh["\']?[^>]*url=([^"\'>\s]+)',
+                r'<(?:iframe|embed|frame)[^>]+src=["\']([^"\']+)',
+                r'<object[^>]+data=["\']([^"\']+)',
+                r'(?:window\.)?location(?:\.href)?\s*=\s*["\']([^"\']+)',
+                r'href=["\']([^"\']+\.pdf(?:\?[^"\']*)?)["\']']
+    for pat in patterns:
+        m = re.search(pat, page, re.I)
+        if m:
+            return urllib.parse.urljoin(base, htmllib.unescape(m.group(1)))
+    return None
+
+
+def save_debug(n: int, body: bytes, ctype: str) -> str:
+    path = HERE / f"sync_debug_{n}.html"
+    try:
+        path.write_bytes(body[:200_000])
+    except OSError:
+        return ""
+    return path.name
+
+
+def describe(body: bytes, ctype: str) -> str:
+    text = body[:4000].decode("utf-8", "replace")
+    title = re.search(r"<title[^>]*>(.*?)</title>", text, re.I | re.S)
+    snippet = re.sub(r"\s+", " ", re.sub(r"<[^>]+>", " ", text)).strip()[:120]
+    return (f"type '{ctype or '?'}', {len(body)} bytes"
+            + (f", page title '{title.group(1).strip()[:80]}'" if title else "")
+            + (f", text: {snippet!r}" if snippet else ""))
 
 
 # --------------------------------- main ------------------------------------ #
-def find_new_lists(cfg: dict, known: set[str], insecure: bool) -> list[AlertLink]:
+def find_new_lists(cfg: dict, known: set[str], client: CDSCOClient) -> list[AlertLink]:
     links: list[AlertLink] = []
     for page in cfg["pages"]:
         try:
-            html_text = cdsco_get(page, insecure).decode("utf-8", "replace")
+            html_text = client.page(page)
         except ssl.SSLError as exc:
             raise SystemExit(f"Secure connection to CDSCO failed ({exc}). If cdsco.gov.in opens in your "
                              "browser, run again with --insecure-cdsco (only CDSCO downloads skip the check).")
@@ -187,7 +253,8 @@ def main(argv: list[str] | None = None) -> int:
         raise SystemExit(f"Website error (HTTP {code}): {known}")
     say(f"website already has {len(known)} CDSCO list(s)")
 
-    new = find_new_lists(cfg, set(known), args.insecure_cdsco)
+    client = CDSCOClient(args.insecure_cdsco)
+    new = find_new_lists(cfg, set(known), client)
     if not new:
         say("No new lists on CDSCO. Nothing to do.")
         return 0
@@ -199,12 +266,16 @@ def main(argv: list[str] | None = None) -> int:
         if args.dry_run:
             continue
         try:
-            pdf = cdsco_get(link.url, args.insecure_cdsco)
+            pdf, ctype, received = client.pdf(link.url)
         except (urllib.error.URLError, OSError, ssl.SSLError) as exc:
             say(f"  download failed: {exc}")
             continue
-        if not pdf.startswith(b"%PDF"):
-            say("  skipped: the link did not return a PDF")
+        if pdf is None:
+            debug = save_debug(todo.index(link) + 1, received, ctype)
+            say(f"  skipped: CDSCO sent {describe(received, ctype)}")
+            if debug:
+                say(f"  (saved what CDSCO sent as {debug} - send it to your developer if this repeats)")
+            say(f"  link: {link.url}")
             continue
         query = urllib.parse.urlencode({"title": link.title, "source_url": link.url,
                                         "released": link.released, "check": "false"})

@@ -6,3 +6,4 @@ data/
 .pytest_cache/
 sync.env
 sync.log
+sync_debug_*.html
