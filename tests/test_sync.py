@@ -10,7 +10,8 @@ from conftest import CENTRAL_PDF, STATE_PDF
 
 ALERTS_HTML = """<table><tr><th>S.no</th><th>Title</th><th>Release Date</th><th>Download Pdf</th></tr>
 <tr><td>3</td><td>Availability of Not Standard Quality (NSQ) Alert on New Link</td><td>2025-Aug-28</td><td><a href="/x.pdf">p</a></td></tr>
-<tr><td>6</td><td>CDSCO NSQ ALERT FOR THE MONTH OF June 2025</td><td>2025-Jul-18</td><td><a href="/download?num_id=central">p</a></td></tr>
+<tr><td>6</td><td>CDSCO NSQ ALERT FOR THE MONTH OF June 2025</td><td>2025-Jul-18</td><td><a href="/download?num_id=
+central	">p</a></td></tr>
 <tr><td>8</td><td>STATE NSQ ALERT FOR THE MONTH OF June 2025</td><td>2025-Jul-18</td><td><a href="/download?num_id=state">p</a></td></tr>
 <tr><td>9</td><td>Revise list drug alert May-2025</td><td>2025-Jul-18</td><td><a href="/download?num_id=broken">p</a></td></tr>
 </table>"""
@@ -142,3 +143,14 @@ def test_inner_pdf_link():
     assert sync.inner_pdf_link('<iframe src="viewer?file=b.pdf"></iframe>', base) == "https://cdsco.gov.in/opencms/viewer?file=b.pdf"
     assert sync.inner_pdf_link('<a href="docs/c.pdf">c</a>', base) == "https://cdsco.gov.in/opencms/docs/c.pdf"
     assert sync.inner_pdf_link("<p>nothing</p>", base) is None
+
+
+def test_clean_url_removes_line_breaks():
+    """Regression from the live CDSCO page: hrefs wrapped over lines crashed urllib."""
+    from cdsco_page import clean_url, parse_alerts_page
+    assert clean_url(" /x.jsp?num_id=MTI5\r\nMjc=\t ") == "/x.jsp?num_id=MTI5Mjc="
+    assert clean_url("/a b.pdf") == "/a%20b.pdf"
+    html = '<table><tr><td>1</td><td>CDSCO NSQ ALERT FOR THE MONTH OF July 2025</td><td>2025-Aug-01</td>' \
+           '<td><a href="/opencms/download_file_division.jsp?num_id=\nMTI5Mjc">p</a></td></tr></table>'
+    [link] = parse_alerts_page(html, "https://cdsco.gov.in/opencms/opencms/en/Alerts/")
+    assert link.url == "https://cdsco.gov.in/opencms/download_file_division.jsp?num_id=MTI5Mjc"

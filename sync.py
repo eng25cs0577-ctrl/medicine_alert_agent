@@ -30,7 +30,7 @@ import urllib.parse
 import urllib.request
 from pathlib import Path
 
-from cdsco_page import USER_AGENT, AlertLink, parse_alerts_page
+from cdsco_page import USER_AGENT, AlertLink, clean_url, parse_alerts_page
 
 HERE = Path(__file__).resolve().parent
 ENV_FILE = HERE / "sync.env"
@@ -132,6 +132,7 @@ class CDSCOClient:
         self.referer = ""
 
     def get(self, url: str, accept: str = "*/*") -> tuple[bytes, str]:
+        url = clean_url(url)
         headers = {"User-Agent": USER_AGENT, "Accept": accept, "Accept-Language": "en-IN,en;q=0.9"}
         if self.referer:
             headers["Referer"] = self.referer
@@ -170,7 +171,7 @@ def inner_pdf_link(page: str, base: str) -> str | None:
     for pat in patterns:
         m = re.search(pat, page, re.I)
         if m:
-            return urllib.parse.urljoin(base, htmllib.unescape(m.group(1)))
+            return urllib.parse.urljoin(base, clean_url(htmllib.unescape(m.group(1))))
     return None
 
 
@@ -267,8 +268,9 @@ def main(argv: list[str] | None = None) -> int:
             continue
         try:
             pdf, ctype, received = client.pdf(link.url)
-        except (urllib.error.URLError, OSError, ssl.SSLError) as exc:
-            say(f"  download failed: {exc}")
+        except Exception as exc:  # noqa: BLE001 - one bad link must not stop the other lists
+            say(f"  download failed: {exc.__class__.__name__}: {str(exc)[:200]}")
+            say(f"  link: {link.url!r}")
             continue
         if pdf is None:
             debug = save_debug(todo.index(link) + 1, received, ctype)
