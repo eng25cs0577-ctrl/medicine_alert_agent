@@ -403,8 +403,13 @@ $("entriesFilter").oninput = renderEntries;
 function renderEntries() {
   const q = $("entriesFilter").value.toLowerCase();
   $("entryRows").innerHTML = "";
-  entries.filter(e => !q || JSON.stringify(e).toLowerCase().includes(q)).forEach(e => $("entryRows").append(el("tr", {},
-    ...[e.sno, e.drug_name, e.batch, e.mfg_date, e.exp_date, e.manufacturer, e.result, e.reported_by].map(v => el("td", {}, String(v ?? ""))))));
+  // search only what is shown (plus "fake"/"spurious" for rows marked as fake)
+  const text = e => [e.sno, e.drug_name, e.batch, e.mfg_date, e.exp_date, e.manufacturer, e.result, e.reported_by,
+    e.spurious ? "fake spurious" : ""].join(" ").toLowerCase();
+  entries.filter(e => !q || text(e).includes(q)).forEach(e => $("entryRows").append(el("tr", {},
+    el("td", {}, String(e.sno ?? "")),
+    el("td", {}, e.drug_name || "", ...(e.spurious ? [" ", el("span", { class: "badge HIGH", title: "Listed as spurious (fake or falsified)" }, "Fake")] : [])),
+    ...[e.batch, e.mfg_date, e.exp_date, e.manufacturer, e.result, e.reported_by].map(v => el("td", {}, String(v ?? ""))))));
 }
 $("pdfFile").onchange = async e => {
   const f = e.target.files[0]; if (!f) return;
