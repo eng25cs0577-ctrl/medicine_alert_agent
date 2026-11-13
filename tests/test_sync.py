@@ -27,9 +27,20 @@ class FakeCDSCO(http.server.BaseHTTPRequestHandler):
         pass
 
     def do_GET(self):
-        files = {"/download?num_id=central": CENTRAL_PDF.read_bytes(), "/download?num_id=state": STATE_PDF.read_bytes(),
-                 "/download?num_id=broken": b"<html>error page</html>"}
-        body = ALERTS_HTML.encode() if self.path.startswith("/alerts") else files.get(self.path)
+        if self.path.startswith("/alerts"):
+            self.send_response(200)
+            self.send_header("Set-Cookie", "JSESSIONID=abc; Path=/")
+            self.end_headers()
+            self.wfile.write(ALERTS_HTML.encode())
+            return
+        browser_like = "JSESSIONID=abc" in (self.headers.get("Cookie") or "") and \
+            "/alerts" in (self.headers.get("Referer") or "")
+        files = {"/download?num_id=central": CENTRAL_PDF.read_bytes(),
+                 "/real/state.pdf": STATE_PDF.read_bytes(),
+                 # like many government sites: a small page that points at the real file
+                 "/download?num_id=state": b'<html><head><meta http-equiv="refresh" content="0;url=/real/state.pdf"></head></html>',
+                 "/download?num_id=broken": b"<html><title>Error</title>Session expired</html>"}
+        body = files.get(self.path) if browser_like else b"<html><title>Access denied</title></html>"
         self.send_response(200 if body else 404)
         self.end_headers()
         self.wfile.write(body or b"")
@@ -69,6 +80,7 @@ def test_sync_downloads_uploads_and_checks(servers, monkeypatch, tmp_path):
     site, cdsco_page = servers
     monkeypatch.setattr(sync, "ENV_FILE", tmp_path / "sync.env")
     monkeypatch.setattr(sync, "LOG_FILE", tmp_path / "sync.log")
+    monkeypatch.setattr(sync, "HERE", tmp_path)
     monkeypatch.setattr(sync.time, "sleep", lambda s: None)
     c = TestClient(web.app, headers={"X-Access-Code": "code"})
     c.post("/api/inventory", json={"name": "Pantrum-40 Tablets", "manufacturer": "Habitare Pharma", "batch": "HT24686"})
@@ -86,6 +98,7 @@ def test_sync_downloads_uploads_and_checks(servers, monkeypatch, tmp_path):
     assert any(a["entry"]["batch"] == "HT24686" and a["level"] == "HIGH" for a in alerts)
     log = (tmp_path / "sync.log").read_text()
     assert "uploaded: 130 entries" in log and "Started a check" in log
+    assert "page title 'Error'" in log and "sync_debug_" in log          # diagnostics for a non-PDF
 
     assert sync.main(args) == 0                                     # second run: nothing new
     log = (tmp_path / "sync.log").read_text()
@@ -120,3 +133,12 @@ def test_upload_needs_code_or_token(servers):
     assert c.post("/api/lists/upload", content=pdf).status_code == 401
     assert c.post("/api/lists/upload?check=false", content=pdf, headers={"X-Check-Token": "tok123"}).json()["entries"] == 55
     assert c.get("/api/lists/sources", headers={"X-Check-Token": "tok123"}).status_code == 200
+
+
+def test_inner_pdf_link():
+    import sync
+    base = "https://cdsco.gov.in/opencms/x.jsp?num_id=1"
+    assert sync.inner_pdf_link('<meta http-equiv="refresh" content="0; url=/f/a.pdf">', base) == "https://cdsco.gov.in/f/a.pdf"
+    assert sync.inner_pdf_link('<iframe src="viewer?file=b.pdf"></iframe>', base) == "https://cdsco.gov.in/opencms/viewer?file=b.pdf"
+    assert sync.inner_pdf_link('<a href="docs/c.pdf">c</a>', base) == "https://cdsco.gov.in/opencms/docs/c.pdf"
+    assert sync.inner_pdf_link("<p>nothing</p>", base) is None

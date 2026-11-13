@@ -6,3 +6,4 @@ data
 tests
 sync.env
 sync.log
+sync_debug_*.html
