@@ -49,8 +49,10 @@ def import_pdf_bytes(data: bytes, title: str = "", source_url: str = "", release
     import tempfile
 
     from cdsco import file_hash
+    from cdsco_page import fix_text
     from nsq_parser import parse_pdf
 
+    title = fix_text(title)
     digest = file_hash(data)
     if storage.list_exists(digest):
         if source_url:

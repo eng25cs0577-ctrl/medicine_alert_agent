@@ -18,6 +18,32 @@ _LIST_RE = re.compile(r"\b(nsq|not\s+of\s+standard\s+quality|spurious|drug\s+ale
 _NOT_A_LIST_RE = re.compile(r"\b(availability|new\s+link|corrigendum|theft|circular)\b", re.I)
 
 
+_MOJIBAKE_RE = re.compile(r"[\u00c2-\u00f4][\u0080-\u00bf\u0152-\u2122]{1,3}")
+
+
+def _cp1252_bytes(text: str) -> bytes:
+    out = bytearray()
+    for ch in text:
+        try:
+            out += ch.encode("cp1252")
+        except UnicodeEncodeError:
+            if ord(ch) > 255:
+                raise
+            out.append(ord(ch))                      # C1 control chars cp1252 has no glyph for
+    return bytes(out)
+
+
+def fix_text(text: str) -> str:
+    """Repair text that was UTF-8 but got read as Windows-1252, as on some CDSCO titles:
+    'January\u00e2\u0080\u0093 2025' -> 'January\u2013 2025'. Clean text is left alone."""
+    def repair(m: re.Match) -> str:
+        try:
+            return _cp1252_bytes(m.group(0)).decode("utf-8")
+        except (UnicodeDecodeError, UnicodeEncodeError):
+            return m.group(0)
+    return _MOJIBAKE_RE.sub(repair, text or "")
+
+
 @dataclass
 class AlertLink:
     title: str
@@ -73,7 +99,7 @@ def parse_alerts_page(page_html: str, base_url: str) -> list[AlertLink]:
     for cells, links in parser.rows:
         if len(cells) < 3 or not links:
             continue
-        title = max(cells, key=len)
+        title = fix_text(max(cells, key=len))
         if not _LIST_RE.search(title) or _NOT_A_LIST_RE.search(title):
             continue
         released = next((c for c in cells if re.match(r"^\d{4}-[A-Za-z]{3}-\d{1,2}$", c)), "")
