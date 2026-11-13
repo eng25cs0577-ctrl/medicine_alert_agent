@@ -59,3 +59,13 @@ def test_public_search():
     assert hits and hits[0][0].drug_name.startswith("Pantrum-40") and hits[0][1] == 1.0
     assert search_entries(ENTRIES, batch="NOTLISTED123") == []
     assert any("Lorazepam" in e.drug_name for e, _ in search_entries(ENTRIES, name="Lorazepam 2 mg"))
+
+
+def test_spurious_entry_without_maker_still_matches():
+    """Spurious lists say "Under Investigation" instead of a maker (stored as ""), so the
+    maker on the inventory must not rule the match out."""
+    entry = NSQEntry(drug_name="Cefixime Tablets IP (TAXIM-O 200 TABLETS)", batch="24460967")
+    same_batch = InventoryItem(name="Taxim-O 200 Tablets", manufacturer="Alkem Laboratories", batch="24460967")
+    other_batch = InventoryItem(name="Cefixime Tablets IP", manufacturer="Alkem Laboratories", batch="X1")
+    assert compare(same_batch, entry)[0] == "HIGH"
+    assert compare(other_batch, entry)[0] == "LOW"              # reviewed by AutoGen, not dropped

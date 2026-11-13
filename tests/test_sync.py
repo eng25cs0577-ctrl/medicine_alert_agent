@@ -6,7 +6,7 @@ import time
 
 import pytest
 
-from conftest import CENTRAL_PDF, STATE_PDF
+from conftest import CENTRAL_PDF, SPURIOUS_PDF, STATE_PDF
 
 ALERTS_HTML = """<table><tr><th>S.no</th><th>Title</th><th>Release Date</th><th>Download Pdf</th></tr>
 <tr><td>3</td><td>Availability of Not Standard Quality (NSQ) Alert on New Link</td><td>2025-Aug-28</td><td><a href="/x.pdf">p</a></td></tr>
@@ -14,6 +14,8 @@ ALERTS_HTML = """<table><tr><th>S.no</th><th>Title</th><th>Release Date</th><th>
 central	">p</a></td></tr>
 <tr><td>8</td><td>STATE NSQ ALERT FOR THE MONTH OF June 2025</td><td>2025-Jul-18</td><td><a href="/download?num_id=state">p</a></td></tr>
 <tr><td>9</td><td>Revise list drug alert May-2025</td><td>2025-Jul-18</td><td><a href="/download?num_id=broken">p</a></td></tr>
+<tr><td>10</td><td>List of spurious Drugs for the month of June-2025</td><td>2025-Jul-18</td><td><a href="/download?num_id=spurious">p</a></td></tr>
+<tr><td>11</td><td>Spurious drug alert for the month of May-2025</td><td>2025-Jul-18</td><td><a href="/download?num_id=damaged">p</a></td></tr>
 </table>"""
 
 
@@ -40,7 +42,9 @@ class FakeCDSCO(http.server.BaseHTTPRequestHandler):
                  "/real/state.pdf": STATE_PDF.read_bytes(),
                  # like many government sites: a small page that points at the real file
                  "/download?num_id=state": b'<html><head><meta http-equiv="refresh" content="0;url=/real/state.pdf"></head></html>',
-                 "/download?num_id=broken": b"<html><title>Error</title>Session expired</html>"}
+                 "/download?num_id=broken": b"<html><title>Error</title>Session expired</html>",
+                 "/download?num_id=spurious": SPURIOUS_PDF.read_bytes(),
+                 "/download?num_id=damaged": b"%PDF-1.4 damaged file"}
         body = files.get(self.path) if browser_like else b"<html><title>Access denied</title></html>"
         self.send_response(200 if body else 404)
         self.end_headers()
@@ -82,9 +86,11 @@ def test_sync_downloads_uploads_and_checks(servers, monkeypatch, tmp_path):
     monkeypatch.setattr(sync, "ENV_FILE", tmp_path / "sync.env")
     monkeypatch.setattr(sync, "LOG_FILE", tmp_path / "sync.log")
     monkeypatch.setattr(sync, "HERE", tmp_path)
+    monkeypatch.setattr(sync, "STATE_FILE", tmp_path / "sync_state.json")
     monkeypatch.setattr(sync.time, "sleep", lambda s: None)
     c = TestClient(web.app, headers={"X-Access-Code": "code"})
     c.post("/api/inventory", json={"name": "Pantrum-40 Tablets", "manufacturer": "Habitare Pharma", "batch": "HT24686"})
+    c.post("/api/inventory", json={"name": "Taxim-O 200 Tablets", "manufacturer": "Alkem Laboratories", "batch": "24460967"})
 
     args = ["--site", site, "--token", "tok123", "--page", cdsco_page, "--quiet"]
     assert sync.main(args + ["--dry-run"]) == 0
@@ -92,19 +98,50 @@ def test_sync_downloads_uploads_and_checks(servers, monkeypatch, tmp_path):
 
     assert sync.main(args) == 0
     lists = c.get("/api/lists").json()
-    assert sorted(l["n_entries"] for l in lists) == [55, 130]       # broken link skipped, notice row ignored
+    assert sorted(l["n_entries"] for l in lists) == [4, 55, 130]    # broken link skipped, notice row ignored
+    assert {l["kind"] for l in lists} == {"central_nsq", "state_nsq", "spurious"}
     assert all(l["source_url"].startswith("http://127.0.0.1") and l["released"] == "2025-Jul-18" for l in lists)
     wait_idle(c)
     alerts = c.get("/api/alerts").json()
     assert any(a["entry"]["batch"] == "HT24686" and a["level"] == "HIGH" for a in alerts)
+    fake = next(a for a in alerts if a["entry"]["batch"] == "24460967")
+    assert fake["level"] == "HIGH" and fake["draft"]["severity"] == "CRITICAL"     # spurious = fake medicine
     log = (tmp_path / "sync.log").read_text()
     assert "uploaded: 130 entries" in log and "Started a check" in log
     assert "page title 'Error'" in log and "sync_debug_" in log          # diagnostics for a non-PDF
+    assert "not imported (HTTP 422)" in log                         # the damaged PDF
+    assert sync.load_state() == {f"{cdsco_page[:-len('/alerts/')]}/download?num_id=damaged": "unreadable"}
 
-    assert sync.main(args) == 0                                     # second run: nothing new
+    (tmp_path / "sync.log").write_text("")
+    assert sync.main(args) == 0                                     # second run: only the failed download
     log = (tmp_path / "sync.log").read_text()
-    assert "website already has 2 CDSCO list(s)" in log
-    assert log.rstrip().endswith("No new lists on CDSCO. Nothing to do.") or "Done: 0 new list(s)" in log
+    assert "website already has 3 CDSCO list(s)" in log and "skipping 1 list(s)" in log
+    assert "1 new list(s) on CDSCO" in log and "Revise list" in log and "damaged" not in log
+
+    (tmp_path / "sync.log").write_text("")
+    assert sync.main(args + ["--retry-skipped"]) == 0               # unreadable ones tried again
+    assert "Spurious drug alert for the month of May-2025" in (tmp_path / "sync.log").read_text()
+
+
+def test_duplicate_upload_records_cdsco_link(servers, monkeypatch, tmp_path):
+    """A list uploaded by hand has no CDSCO link; the sync's duplicate upload adds it,
+    so the next run doesn't download it again."""
+    import sync
+    from fastapi.testclient import TestClient
+    import web
+    site, cdsco_page = servers
+    for name in ("ENV_FILE", "LOG_FILE", "STATE_FILE"):
+        monkeypatch.setattr(sync, name, tmp_path / name.lower())
+    monkeypatch.setattr(sync, "HERE", tmp_path)
+    monkeypatch.setattr(sync.time, "sleep", lambda s: None)
+    c = TestClient(web.app, headers={"X-Access-Code": "code"})
+    assert c.post("/api/lists/upload?check=false", content=CENTRAL_PDF.read_bytes()).json()["status"] == "imported"
+    assert c.get("/api/lists/sources").json() == []
+
+    assert sync.main(["--site", site, "--token", "tok123", "--page", cdsco_page, "--quiet", "--max", "1"]) == 0
+    assert "duplicate: already on the website" in (tmp_path / "log_file").read_text()
+    [source] = c.get("/api/lists/sources").json()
+    assert source.endswith("/download?num_id=central")
 
 
 def test_sync_rejects_wrong_token(servers, monkeypatch, tmp_path):

@@ -35,6 +35,7 @@ from cdsco_page import USER_AGENT, AlertLink, clean_url, parse_alerts_page
 HERE = Path(__file__).resolve().parent
 ENV_FILE = HERE / "sync.env"
 LOG_FILE = HERE / "sync.log"
+STATE_FILE = HERE / "sync_state.json"     # CDSCO links already handled (duplicate / unreadable)
 DEFAULT_PAGES = ["https://cdsco.gov.in/opencms/opencms/en/Alerts/"]
 
 
@@ -47,6 +48,23 @@ def say(msg: str) -> None:
             f.write(line + "\n")
     except OSError:
         pass
+
+
+# ------------------------- lists already handled --------------------------- #
+def load_state() -> dict[str, str]:
+    """{CDSCO link: "duplicate" | "unreadable"}, so later runs move on to other lists."""
+    try:
+        data = json.loads(STATE_FILE.read_text(encoding="utf-8"))
+        return {str(k): str(v) for k, v in data.get("handled", {}).items()}
+    except (OSError, ValueError, AttributeError):
+        return {}
+
+
+def save_state(handled: dict[str, str]) -> None:
+    try:
+        STATE_FILE.write_text(json.dumps({"handled": handled}, indent=1), encoding="utf-8")
+    except OSError as exc:
+        say(f"(could not save {STATE_FILE.name}: {exc})")
 
 
 # ------------------------------ settings ----------------------------------- #
@@ -237,6 +255,8 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--token", help="your CHECK_TOKEN")
     p.add_argument("--page", action="append", help="CDSCO page to read (can repeat); default: the Alerts page")
     p.add_argument("--max", type=int, default=6, help="upload at most this many new lists per run (default 6)")
+    p.add_argument("--retry-skipped", action="store_true",
+                   help="try again lists that earlier runs found unreadable (e.g. after a website update)")
     p.add_argument("--dry-run", action="store_true", help="only show what would be uploaded")
     p.add_argument("--quiet", action="store_true", help="never ask questions (for Task Scheduler)")
     p.add_argument("--insecure-cdsco", action="store_true",
@@ -254,8 +274,13 @@ def main(argv: list[str] | None = None) -> int:
         raise SystemExit(f"Website error (HTTP {code}): {known}")
     say(f"website already has {len(known)} CDSCO list(s)")
 
+    handled = load_state()
+    skip = {url for url, why in handled.items() if not (args.retry_skipped and why == "unreadable")}
+    if skip:
+        say(f"skipping {len(skip)} list(s) earlier runs found duplicate/unreadable "
+            f"(see {STATE_FILE.name}; --retry-skipped tries unreadable ones again)")
     client = CDSCOClient(args.insecure_cdsco)
-    new = find_new_lists(cfg, set(known), client)
+    new = find_new_lists(cfg, set(known) | skip, client)
     if not new:
         say("No new lists on CDSCO. Nothing to do.")
         return 0
@@ -287,12 +312,17 @@ def main(argv: list[str] | None = None) -> int:
             status = result.get("status")
             if status == "imported":
                 uploaded += 1
+                handled.pop(link.url, None)           # the website now lists it as a source
                 say(f"  uploaded: {result.get('entries')} entries ({result.get('kind')}, {result.get('month') or '?'})")
             else:
+                handled[link.url] = "duplicate"
                 say(f"  {status}: already on the website")
         else:
             detail = result.get("detail") if isinstance(result, dict) else result
+            if code == 422:                           # the website can't read this list: don't retry daily
+                handled[link.url] = "unreadable"
             say(f"  not imported (HTTP {code}): {detail}")
+        save_state(handled)
     if args.dry_run:
         say("Dry run: nothing was uploaded.")
         return 0

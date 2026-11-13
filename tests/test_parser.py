@@ -1,7 +1,7 @@
 """Reading real CDSCO PDFs (June 2025 state + central lists)."""
 import pytest
 
-from conftest import CENTRAL_PDF, STATE_PDF
+from conftest import CENTRAL_PDF, REVISED_PDF, SPURIOUS_PDF, STATE_PDF
 from nsq_parser import detect_kind, detect_month, normalize_batch, normalize_date, parse_pdf, parse_rows
 
 
@@ -53,3 +53,43 @@ def test_columns_found_by_header_even_if_reordered():
     [e] = parse_rows(rows)
     assert (e.drug_name, e.batch, e.exp_date, e.mfg_date, e.manufacturer) == (
         "Test Tablets 5 mg", "AB12", "2027-01", "2025-02", "M/s. X Ltd.")
+
+
+def test_spurious_list_read_completely():
+    """Real June 2025 spurious list: merged header cells, names split over table rows,
+    a page break, and "Under Investigation" in place of the maker."""
+    lst = parse_pdf(SPURIOUS_PDF)
+    assert lst.kind == "spurious" and lst.month == "2025-06"
+    assert [(e.sno, e.batch) for e in lst.entries] == [
+        (1, "24460967"), (2, "I404138"), (3, "SIF2676A"), (4, "SIF2736A")]
+    first, second = lst.entries[:2]
+    assert first.drug_name == "Cefixime Tablets IP (TAXIM-O 200 TABLETS)"
+    assert (first.mfg_date, first.exp_date) == ("2024-07", "2026-06")
+    assert first.manufacturer == ""                              # "Under Investigation"
+    assert first.result == "Identification and Assay of Cefixime Trihydrate"
+    assert first.reported_by == "Drugs Inspector, Bihar"
+    assert second.drug_name == "Ointment of Heparin Sodium and Benzyl Nicotinate (THROMBOPHOB)"
+    assert lst.entries[3].drug_name == "Rosuvas F 20 Tablets Rosuvastatin and Fenofibrate Tablets IP"
+    assert lst.entries[3].exp_date == "2027-05"                  # "05-2027"
+
+
+def test_revised_drug_alert_read():
+    """'Revised' drug alert: the heading names NSQ/spurious/adulterated, but its only row is spurious."""
+    lst = parse_pdf(REVISED_PDF)
+    assert lst.kind == "spurious" and lst.month == "2025-05"
+    [e] = lst.entries
+    assert (e.sno, e.drug_name, e.batch) == (19, "Tranexamic Acid Tablets IP (Trenaxa 500)", "18242021A")
+    assert (e.mfg_date, e.exp_date, e.manufacturer) == ("2024-08", "2027-07", "")
+
+
+def test_mixed_drug_alert_kind():
+    heading = "Drug Alert: declared as Not of Standard Quality/Spurious/Adulterated/Misbranded"
+    assert detect_kind(heading) == "other"
+    assert detect_kind(heading, all_spurious=True) == "spurious"
+
+
+def test_data_row_mentioning_batch_and_drug_is_not_a_header():
+    rows = [["S.No.", "Name of Drugs", "Batch No.", "Manufactured By", "Firm's reply"],
+            ["1.", "Test Tablets", "AB1", "Under Investigation", "batch not made by them; spurious drug"]]
+    [e] = parse_rows(rows)
+    assert (e.drug_name, e.batch, e.manufacturer) == ("Test Tablets", "AB1", "")

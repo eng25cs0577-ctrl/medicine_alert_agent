@@ -123,6 +123,14 @@ def list_exists(file_hash: str) -> bool:
     return _run("SELECT id FROM lists WHERE file_hash = ?", (file_hash,), fetch="one") is not None
 
 
+def set_source_if_missing(file_hash: str, source_url: str, released: str = "") -> None:
+    """A list uploaded by hand has no CDSCO link; record it when the laptop sync sends the
+    same file, so the sync knows the list is already here."""
+    _run("UPDATE lists SET source_url = ?, released = COALESCE(NULLIF(released, ''), ?)"
+         " WHERE file_hash = ? AND (source_url IS NULL OR source_url = '')",
+         (source_url, released, file_hash), commit=True)
+
+
 def save_list(lst: NSQList, file_hash: str) -> int:
     list_id = _run("INSERT INTO lists (title, kind, month, source_url, released, file_hash, n_entries, created)"
                    " VALUES (?, ?, ?, ?, ?, ?, ?, ?)",

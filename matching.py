@@ -107,7 +107,9 @@ def batch_variants(batch: str) -> set[str]:
 def compare(item: InventoryItem, entry: NSQEntry) -> tuple[str | None, float, str]:
     """Return (level or None, score, explanation)."""
     n_sim = name_similarity(item.name, entry.drug_name)
-    m_sim = maker_similarity(item.manufacturer, entry.manufacturer) if item.manufacturer else None
+    # Unknown maker on either side (spurious lists: "Under Investigation") -> not compared
+    m_sim = (maker_similarity(item.manufacturer, entry.manufacturer)
+             if item.manufacturer and entry.manufacturer else None)
     same_batch = bool(item.batch) and bool(batch_variants(item.batch) & batch_variants(entry.batch))
     s_item, s_entry = strengths(item.name), strengths(entry.drug_name)
     strength_clash = bool(s_item and s_entry and not (s_item & s_entry))
