@@ -83,12 +83,15 @@ def detect_kind(text: str, all_spurious: bool = False) -> str:
 
 
 def detect_month(text: str) -> str:
-    """'... FOR THE MONTH OF JUNE– 2025 ...' -> '2025-06'."""
+    """'... FOR THE MONTH OF JUNE– 2025 ...' / 'month of Feb-2025' -> '2025-06' / '2025-02'."""
     t = text.lower()
-    m = re.search(r"month\s+of\s+([a-z]+)\W*(\d{4})", t) or \
-        re.search(r"\b(" + "|".join(_FULL_MONTHS) + r")\W{0,3}(\d{4})\b", t)
-    if m and m.group(1) in _FULL_MONTHS:
-        return f"{m.group(2)}-{_FULL_MONTHS[m.group(1)]:02d}"
+    m = re.search(r"month\s+(?:of\s+)?([a-z]+)\W*(\d{4})", t)
+    if m and m.group(1)[:3] in _MONTHS and (m.group(1) in _FULL_MONTHS or len(m.group(1)) <= 4):
+        return f"{m.group(2)}-{_MONTHS[m.group(1)[:3]]:02d}"
+    m = re.search(r"\b(" + "|".join(_FULL_MONTHS) + r")\W{0,3}(\d{4})\b", t) or \
+        re.search(r"\b(jan|feb|mar|apr|jun|jul|aug|sept?|oct|nov|dec)[\-\s.,']{1,3}(\d{4})\b", t)
+    if m:
+        return f"{m.group(2)}-{_MONTHS[m.group(1)[:3]]:02d}"
     return ""
 
 

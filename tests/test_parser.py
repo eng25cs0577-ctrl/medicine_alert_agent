@@ -93,3 +93,37 @@ def test_data_row_mentioning_batch_and_drug_is_not_a_header():
             ["1.", "Test Tablets", "AB1", "Under Investigation", "batch not made by them; spurious drug"]]
     [e] = parse_rows(rows)
     assert (e.drug_name, e.batch, e.manufacturer) == ("Test Tablets", "AB1", "")
+
+
+@pytest.mark.parametrize("text,month", [
+    ("NSQ ALERT FOR THE MONTH OF Feb-2025", "2025-02"),          # live CDSCO title, was "?"
+    ("State NSQ Alert For The Month April-2025", "2025-04"),
+    ("declared as Spurious for the Month of March- 2025", "2025-03"),
+    ("Revise list drug alert November-2024", "2024-11"),
+    ("for the month of the year 2025", "")])
+def test_detect_month_short_names(text, month):
+    assert detect_month(text) == month
+
+
+def test_garbled_titles_repaired():
+    from cdsco_page import fix_text, parse_alerts_page
+    assert fix_text("Month of Januaryâ\u0080\u0093 2025 Revised") == "Month of January– 2025 Revised"
+    assert fix_text("Café – 500 mg") == "Café – 500 mg"           # correct text untouched
+    page = ("<table><tr><td>1</td><td>Spurious list for the Month of Januaryâ\u0080\u0093 2025</td>"
+            "<td>2025-May-20</td><td><a href='/a.pdf'>p</a></td></tr></table>")
+    [link] = parse_alerts_page(page, "https://cdsco.gov.in/")
+    assert link.title == "Spurious list for the Month of January– 2025"
+
+
+def test_stored_lists_repaired(tmp_db):
+    import storage
+    from models import NSQEntry, NSQList
+    e = [NSQEntry(drug_name="X Tablets", batch="B1")]
+    storage.save_list(NSQList(title="NSQ ALERT FOR THE MONTH OF Feb-2025", entries=e), "h1")
+    storage.save_list(NSQList(title="Spurious, Month of Januaryâ\u0080\u0093 2025", month="2025-01",
+                              entries=e), "h2")
+    assert storage.repair_lists() == 2
+    got = {l["title"]: l["month"] for l in storage.get_lists()}
+    assert got == {"NSQ ALERT FOR THE MONTH OF Feb-2025": "2025-02",
+                   "Spurious, Month of January– 2025": "2025-01"}
+    assert storage.repair_lists() == 0

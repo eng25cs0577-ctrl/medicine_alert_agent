@@ -144,6 +144,22 @@ def save_list(lst: NSQList, file_hash: str) -> int:
     return list_id
 
 
+def repair_lists() -> int:
+    """Fill in what older versions missed: garbled titles ('Januaryâ 2025') and months
+    written short ('Feb-2025'). Runs at start-up; returns how many lists changed."""
+    from cdsco_page import fix_text
+    from nsq_parser import detect_month
+
+    changed = 0
+    for row in _run("SELECT id, title, month FROM lists", fetch="all"):
+        title = fix_text(row["title"] or "")
+        month = row["month"] or detect_month(title)
+        if title != (row["title"] or "") or month != (row["month"] or ""):
+            _run("UPDATE lists SET title = ?, month = ? WHERE id = ?", (title, month, row["id"]), commit=True)
+            changed += 1
+    return changed
+
+
 def get_lists() -> list[dict]:
     return _run("SELECT id, title, kind, month, source_url, released, n_entries, created FROM lists"
                 " ORDER BY month DESC, created DESC", fetch="all")

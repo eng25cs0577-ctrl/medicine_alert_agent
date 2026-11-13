@@ -13,6 +13,7 @@ import csv
 import io
 import secrets
 import threading
+from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Literal
 
@@ -31,7 +32,19 @@ log = get_logger("Web")
 STATIC = Path(__file__).parent / "static"
 MAX_PDF_BYTES = 15 * 1024 * 1024
 
-app = FastAPI(title="MedAlert")
+
+
+@asynccontextmanager
+async def lifespan(_app: FastAPI):
+    try:                       # titles/months that older versions stored garbled or empty
+        if n := storage.repair_lists():
+            log.info("repaired the title/month of %d stored list(s)", n)
+    except Exception as exc:  # noqa: BLE001 - never block start-up
+        log.warning("could not repair stored lists: %s", exc)
+    yield
+
+
+app = FastAPI(title="MedAlert", lifespan=lifespan)
 app.mount("/static", StaticFiles(directory=STATIC), name="static")
 _running = threading.Event()
 
