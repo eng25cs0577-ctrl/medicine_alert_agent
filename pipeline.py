@@ -54,10 +54,12 @@ def import_pdf_bytes(data: bytes, title: str = "", source_url: str = "", release
 
     title = fix_text(title)
     digest = file_hash(data)
-    if storage.list_exists(digest):
+    existing = storage.find_list(digest)
+    if existing:
         if source_url:
             storage.set_source_if_missing(digest, source_url, released)
-        return {"status": "duplicate", "title": title}
+        if not storage.needs_reread(existing):
+            return {"status": "duplicate", "title": title}
     with tempfile.NamedTemporaryFile(suffix=".pdf") as f:
         f.write(data)
         f.flush()
@@ -66,6 +68,10 @@ def import_pdf_bytes(data: bytes, title: str = "", source_url: str = "", release
         except Exception as exc:  # noqa: BLE001 - a damaged PDF is "unreadable", not a server error
             log.warning("could not read %r: %s", title[:60], exc)
             return {"status": "empty", "title": title}
+    if existing:                                   # same file, read again with the newer parser
+        marked = storage.upgrade_list(existing["id"], lst)
+        return {"status": "updated", "id": existing["id"], "title": lst.title, "kind": lst.kind,
+                "month": lst.month, "spurious": marked}
     if not lst.entries:
         return {"status": "empty", "title": lst.title}
     list_id = storage.save_list(lst, digest)
@@ -116,7 +122,8 @@ def match(state: CheckState) -> dict:
             if level:
                 found.append({"inventory": item.model_dump(), "entry": entry.model_dump(),
                               "entry_id": row["id"], "list_id": row["list_id"],
-                              "list_title": row["list_title"], "spurious": row["list_kind"] == "spurious",
+                              "list_title": row["list_title"],
+                              "spurious": row["list_kind"] == "spurious" or bool(row.get("spurious")),
                               "level": level, "score": score, "why": why})
     counts = {lvl: sum(1 for m in found if m["level"] == lvl) for lvl in ("HIGH", "MEDIUM", "LOW")}
     return {"matches": found, "notes": _note(

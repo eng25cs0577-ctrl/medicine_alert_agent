@@ -65,6 +65,8 @@ A clearly different maker, or a different strength, is **not** a match.
 ### Severity
 - **CRITICAL:** a sterile product (injection, infusion, eye drops) failed sterility,
   particulate or endotoxin tests, or the product is spurious.
+  Some CDSCO "Drug Alert" lists mix failed-quality and fake rows; each row is marked
+  separately, so only the fake ones are CRITICAL (list type "NSQ + spurious").
 - **HIGH:** failed assay, dissolution or content, so the dose may be wrong.
 - **MODERATE:** appearance, weight or labelling defects.
 
@@ -166,6 +168,8 @@ It opens fine from a computer **in India**. `sync.py` runs on your laptop and:
 3. uploads them to your website (using your `CHECK_TOKEN`), then starts **one** check;
 4. remembers lists the website already had or couldn't read (in `sync_state.json`),
    so each run moves on to new lists instead of retrying the same ones.
+5. downloads again lists that an older website version read, when a newer version
+   reads them better (e.g. marking fake medicines in mixed lists): shown as "re-read".
 
 It needs only a normal Python install (standard library only, no `pip install`).
 

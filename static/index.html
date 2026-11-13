@@ -239,7 +239,7 @@ function el(tag, attrs = {}, ...kids) {
   return e;
 }
 const fmt = ts => ts ? new Date(ts * 1000).toLocaleString([], { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" }) : "";
-const kindName = k => ({ central_nsq: "NSQ (CDSCO labs)", state_nsq: "NSQ (state labs)", spurious: "Spurious", other: "Other" }[k] || k);
+const kindName = k => ({ central_nsq: "NSQ (CDSCO labs)", state_nsq: "NSQ (state labs)", spurious: "Spurious", mixed: "NSQ + spurious", other: "Other" }[k] || k);
 
 // ---------- tabs ----------
 document.querySelectorAll("#nav button").forEach(b => b.onclick = () => show(b.dataset.tab));
@@ -430,7 +430,7 @@ async function runSearch() {
       exact ? "⚠ This batch appears on a CDSCO list. Don't use it - show it to your pharmacist or doctor."
             : "These listed batches have a similar name. Compare the batch number on your pack - only that exact batch is affected."));
     res.forEach(r => $("qResults").append(el("div", { class: "card", style: "margin-bottom:8px" },
-      el("div", { class: "row" }, el("b", {}, r.drug_name), el("span", { class: "badge LOW" }, kindName(r.list_kind)), el("span", { class: "muted small" }, r.list_month)),
+      el("div", { class: "row" }, el("b", {}, r.drug_name), el("span", { class: "badge " + (r.spurious ? "HIGH" : "LOW") }, r.spurious ? "Spurious (fake)" : kindName(r.list_kind)), el("span", { class: "muted small" }, r.list_month)),
       el("div", { class: "small" }, `Batch ${r.batch} · ${r.manufacturer.split(",")[0]} · failed: ${r.result}`))));
   } catch (e) { $("qErr").textContent = e.message; }
 }

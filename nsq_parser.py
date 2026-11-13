@@ -66,13 +66,21 @@ def normalize_batch(text: str) -> str:
     return re.sub(r"\s+", "", text or "").strip(" .,;").upper()
 
 
-def detect_kind(text: str, all_spurious: bool = False) -> str:
+PARSER_VERSION = 2   # 2: spurious rows marked one by one. Older lists are re-read by the laptop sync.
+_SPURIOUS_ROW = re.compile(r"(?<!not )(?<!not a )\bspurious\b", re.I)
+
+
+def detect_kind(text: str, all_spurious: bool = False, any_spurious: bool = False) -> str:
     """A "drug alert" heading can name several categories ("Not of Standard Quality/
-    Spurious/Adulterated"); such a list counts as spurious only if every row is."""
+    Spurious/Adulterated"). Such a list is "spurious" if every row is, "mixed" if some are."""
     t = clean(text).lower()
+    if all_spurious:
+        return "spurious"
+    if any_spurious:
+        return "mixed"
     if "spurious" in t:
         mixed = "standard quality" in t or "adulterated" in t or "misbranded" in t
-        if all_spurious or not mixed:
+        if not mixed:
             return "spurious"
         t = t.replace("spurious", "")
     if "state lab" in t or "state drug" in t or "(state" in t:
@@ -170,7 +178,7 @@ def _parse(rows: list[list[str | None]]) -> list[tuple[NSQEntry, bool]]:
             manufacturer="" if _UNKNOWN_MAKER.match(maker) else maker,
             result=get("result").strip('" '),
             reported_by=get("reported_by"),
-        ), "spurious" in get("remarks").lower()))
+        ), bool(_SPURIOUS_ROW.search(get("remarks") + " " + get("result")))))
     return out
 
 
@@ -192,10 +200,10 @@ def parse_pdf(path: str | Path, title: str = "", source_url: str = "", released:
                 rows.extend(table)
     heading = clean(first_text.split("As part of")[0])[:200] or clean(first_text)[:200]
     parsed = _parse(rows)
-    entries = [entry for entry, _ in parsed]
     all_spurious = bool(parsed) and all(sp for _, sp in parsed)
-    lst = NSQList(title=title or heading or Path(path).stem,
-                  kind=detect_kind(title + " " + first_text, all_spurious),
+    kind = detect_kind(title + " " + first_text, all_spurious, any(sp for _, sp in parsed))
+    entries = [entry.model_copy(update={"spurious": sp or kind == "spurious"}) for entry, sp in parsed]
+    lst = NSQList(title=title or heading or Path(path).stem, kind=kind,
                   month=detect_month(title + " " + first_text), source_url=source_url,
                   released=released, entries=entries)
     log.info("parsed %r: %d entries (%s, %s)", lst.title[:70], len(entries), lst.kind, lst.month or "month?")

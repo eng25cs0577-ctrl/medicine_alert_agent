@@ -127,3 +127,15 @@ def test_stored_lists_repaired(tmp_db):
     assert got == {"NSQ ALERT FOR THE MONTH OF Feb-2025": "2025-02",
                    "Spurious, Month of January– 2025": "2025-01"}
     assert storage.repair_lists() == 0
+
+
+def test_mixed_list_marks_spurious_rows_only():
+    """2023-24 'Drug Alert' lists mix failed-quality and fake rows in one table."""
+    from nsq_parser import _parse
+    rows = [["S.No.", "Name of Drugs", "Batch No.", "Manufactured By", "Reason for failure", "Remarks"],
+            ["1.", "Real Tablets", "A1", "M/s. Good Ltd.", "Dissolution", "Firm has not disputed the result"],
+            ["2.", "Fake Tablets", "B2", "Under Investigation", "Identification",
+             "The product is purported to be spurious, subject to investigation."],
+            ["3.", "Other Tablets", "C3", "M/s. Fine Ltd.", "Assay", "The firm says it is not spurious"]]
+    assert [sp for _, sp in _parse(rows)] == [False, True, False]
+    assert detect_kind("Drug Alert for the Month of February 2024", any_spurious=True) == "mixed"

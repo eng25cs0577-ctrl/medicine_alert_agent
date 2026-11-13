@@ -81,3 +81,52 @@ def test_cdsco_page_parsing_and_blocked_site(client, monkeypatch):
     client.post("/api/check?source=cdsco"); wait_idle(client)
     run = client.get("/api/runs").json()[0]
     assert run["status"] == "done" and any("could not reach CDSCO" in l["msg"] for l in run["log"])
+
+
+def test_old_list_is_reread_and_spurious_rows_marked(tmp_db):
+    """A list stored by an older version (no per-row spurious marks) is offered to the laptop
+    sync again; re-uploading the same PDF marks the fake rows and re-drafts undecided alerts."""
+    import storage
+    from cdsco import file_hash
+    from conftest import SPURIOUS_PDF
+    from fastapi.testclient import TestClient
+    from models import InventoryItem
+    from nsq_parser import parse_pdf
+    import web
+
+    data = SPURIOUS_PDF.read_bytes()
+    old = parse_pdf(SPURIOUS_PDF, source_url="https://cdsco.gov.in/x")
+    old = old.model_copy(update={"kind": "other",
+                                 "entries": [e.model_copy(update={"spurious": False}) for e in old.entries]})
+    list_id = storage.save_list(old, file_hash(data))
+    storage._run("UPDATE lists SET parser_version = 0 WHERE id = ?", (list_id,), commit=True)
+    entry_id = storage.get_entries(list_id)[0]["id"]
+    item = InventoryItem(id=storage.add_item(InventoryItem(name="Taxim-O 200", batch="24460967")),
+                         name="Taxim-O 200", batch="24460967")
+    alert_id = storage.save_alert(inventory=item, entry_id=entry_id, entry=storage.entry_model(
+        storage.get_entries(list_id)[0]), list_id=list_id, list_title="x", level="HIGH", score=1,
+        why="", review=None, draft={"severity": "HIGH"})
+
+    c = TestClient(web.app)
+    assert c.get("/api/lists/sources").json() == []              # offered to the sync again
+    r = c.post("/api/lists/upload?check=false", content=data).json()
+    assert r["status"] == "updated" and r["spurious"] == 4 and r["kind"] == "spurious"
+    assert all(e["spurious"] for e in storage.get_entries(list_id))
+    assert c.get("/api/lists/sources").json() == ["https://cdsco.gov.in/x"]
+    assert alert_id not in [a["id"] for a in storage.get_alerts()]   # undecided alert re-drafted next check
+    assert c.post("/api/lists/upload?check=false", content=data).json()["status"] == "duplicate"
+
+
+def test_spurious_row_in_mixed_list_is_critical(tmp_db):
+    import pipeline
+    import storage
+    from models import InventoryItem, NSQEntry, NSQList
+    storage.save_list(NSQList(title="Drug Alert February 2024", kind="mixed", entries=[
+        NSQEntry(sno=1, drug_name="Real Tablets 10 mg", batch="A1", result="Dissolution"),
+        NSQEntry(sno=2, drug_name="Fake Tablets 10 mg", batch="B2", result="Identification", spurious=True)]),
+        "hash-mixed")
+    storage.add_item(InventoryItem(name="Real Tablets 10 mg", batch="A1"))
+    storage.add_item(InventoryItem(name="Fake Tablets 10 mg", batch="B2"))
+    pipeline.run_check("none")
+    sev = {a["entry"]["batch"]: a["draft"]["severity"] for a in storage.get_alerts()}
+    assert sev["B2"] == "CRITICAL" and sev["A1"] != "CRITICAL"

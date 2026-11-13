@@ -40,7 +40,11 @@ CREATE TABLE IF NOT EXISTS runs (
 );
 """
 
+# Columns added after the first release (old databases get them on first use).
+_ADDED_COLUMNS = [("entries", "spurious", "INTEGER DEFAULT 0"), ("lists", "parser_version", "INTEGER DEFAULT 0")]
+
 _pg_ready: set[str] = set()
+_sqlite_ready: set[str] = set()
 
 
 def backend() -> str:
@@ -63,6 +67,12 @@ def _sqlite():
     conn.row_factory = sqlite3.Row
     for stmt in _statements("INTEGER PRIMARY KEY AUTOINCREMENT", "REAL"):
         conn.execute(stmt)
+    if str(path) not in _sqlite_ready:
+        for table, column, sql_type in _ADDED_COLUMNS:
+            if column not in {r[1] for r in conn.execute(f"PRAGMA table_info({table})")}:
+                conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {sql_type}")
+        conn.commit()
+        _sqlite_ready.add(str(path))
     return conn
 
 
@@ -76,6 +86,8 @@ def _postgres():
         with conn.cursor() as cur:
             for stmt in _statements("SERIAL PRIMARY KEY", "DOUBLE PRECISION"):
                 cur.execute(stmt)
+            for table, column, sql_type in _ADDED_COLUMNS:
+                cur.execute(f"ALTER TABLE {table} ADD COLUMN IF NOT EXISTS {column} {sql_type}")
         conn.commit()
         _pg_ready.add(url)
     return conn
@@ -123,6 +135,38 @@ def list_exists(file_hash: str) -> bool:
     return _run("SELECT id FROM lists WHERE file_hash = ?", (file_hash,), fetch="one") is not None
 
 
+def find_list(file_hash: str) -> dict | None:
+    return _run("SELECT id, kind, parser_version FROM lists WHERE file_hash = ?", (file_hash,), fetch="one")
+
+
+def needs_reread(row: dict) -> bool:
+    """Lists read before spurious rows were marked one by one (a pure spurious list was
+    already right). The laptop sync downloads these again so they can be upgraded."""
+    from nsq_parser import PARSER_VERSION
+    return (row.get("parser_version") or 0) < PARSER_VERSION and row.get("kind") != "spurious"
+
+
+def upgrade_list(list_id: int, lst: NSQList) -> int:
+    """Apply a re-read of the same PDF: new list type and spurious marks on existing rows
+    (rows keep their ids, so pharmacist decisions stay linked). Undecided alerts on rows
+    that turned out spurious are removed, so the next check re-drafts them as CRITICAL.
+    Returns how many rows are now marked spurious."""
+    from nsq_parser import PARSER_VERSION
+    marked = 0
+    for e in lst.entries:
+        if not e.spurious:
+            continue
+        rows = _run("SELECT id FROM entries WHERE list_id = ? AND sno = ? AND batch = ?",
+                    (list_id, e.sno, e.batch), fetch="all")
+        for row in rows:
+            _run("UPDATE entries SET spurious = 1 WHERE id = ?", (row["id"],), commit=True)
+            _run("DELETE FROM alerts WHERE entry_id = ? AND status = 'new'", (row["id"],), commit=True)
+            marked += 1
+    _run("UPDATE lists SET kind = ?, parser_version = ? WHERE id = ?", (lst.kind, PARSER_VERSION, list_id),
+         commit=True)
+    return marked
+
+
 def set_source_if_missing(file_hash: str, source_url: str, released: str = "") -> None:
     """A list uploaded by hand has no CDSCO link; record it when the laptop sync sends the
     same file, so the sync knows the list is already here."""
@@ -132,15 +176,16 @@ def set_source_if_missing(file_hash: str, source_url: str, released: str = "") -
 
 
 def save_list(lst: NSQList, file_hash: str) -> int:
-    list_id = _run("INSERT INTO lists (title, kind, month, source_url, released, file_hash, n_entries, created)"
-                   " VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+    from nsq_parser import PARSER_VERSION
+    list_id = _run("INSERT INTO lists (title, kind, month, source_url, released, file_hash, n_entries, created,"
+                   " parser_version) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
                    (lst.title, lst.kind, lst.month, lst.source_url, lst.released, file_hash,
-                    len(lst.entries), time.time()), commit=True, returning_id=True)
+                    len(lst.entries), time.time(), PARSER_VERSION), commit=True, returning_id=True)
     for e in lst.entries:
         _run("INSERT INTO entries (list_id, sno, drug_name, batch, mfg_date, exp_date, manufacturer, result,"
-             " reported_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+             " reported_by, spurious) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
              (list_id, e.sno, e.drug_name, e.batch, e.mfg_date, e.exp_date, e.manufacturer, e.result,
-              e.reported_by), commit=True)
+              e.reported_by, int(e.spurious)), commit=True)
     return list_id
 
 
@@ -161,7 +206,7 @@ def repair_lists() -> int:
 
 
 def get_lists() -> list[dict]:
-    return _run("SELECT id, title, kind, month, source_url, released, n_entries, created FROM lists"
+    return _run("SELECT id, title, kind, month, source_url, released, n_entries, created, parser_version FROM lists"
                 " ORDER BY month DESC, created DESC", fetch="all")
 
 
@@ -174,7 +219,8 @@ def get_entries(list_id: int | None = None) -> list[dict]:
 
 
 def entry_model(row: dict) -> NSQEntry:
-    return NSQEntry(**{k: row.get(k) or ("" if k != "sno" else 0) for k in NSQEntry.model_fields})
+    defaults = {"sno": 0, "spurious": False}
+    return NSQEntry(**{k: row.get(k) or defaults.get(k, "") for k in NSQEntry.model_fields})
 
 
 def delete_list(list_id: int) -> bool:
