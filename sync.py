@@ -314,6 +314,10 @@ def main(argv: list[str] | None = None) -> int:
                 uploaded += 1
                 handled.pop(link.url, None)           # the website now lists it as a source
                 say(f"  uploaded: {result.get('entries')} entries ({result.get('kind')}, {result.get('month') or '?'})")
+            elif status == "updated":                 # re-read by a newer website version
+                uploaded += 1 if result.get("spurious") else 0
+                say(f"  re-read: {result.get('spurious') or 0} fake (spurious) medicine(s) marked "
+                    f"({result.get('kind')})")
             else:
                 handled[link.url] = "duplicate"
                 say(f"  {status}: already on the website")

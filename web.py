@@ -172,7 +172,7 @@ def list_sources(x_access_code: str | None = Header(default=None),
                  x_check_token: str | None = Header(default=None)) -> list[str]:
     """CDSCO links of the lists already stored, so the laptop sync skips them."""
     _check_access_or_token(x_access_code, x_check_token)
-    return [l["source_url"] for l in storage.get_lists() if l.get("source_url")]
+    return [l["source_url"] for l in storage.get_lists() if l.get("source_url") and not storage.needs_reread(l)]
 
 
 @app.delete("/api/lists/{list_id}")
@@ -200,7 +200,7 @@ async def upload_list(request: Request, title: str = "", source_url: str = "", r
     result = import_pdf_bytes(data, title=title[:300], source_url=source_url[:500], released=released[:40])
     if result["status"] == "empty":
         raise HTTPException(status_code=422, detail="No table rows found - is this a CDSCO NSQ/spurious list?")
-    if check and result["status"] == "imported" and not _running.is_set():
+    if check and (result["status"] == "imported" or result.get("spurious")) and not _running.is_set():
         _start_check("none")
     return result
 

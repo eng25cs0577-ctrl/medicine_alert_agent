@@ -10,7 +10,7 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
-ListKind = Literal["central_nsq", "state_nsq", "spurious", "other"]
+ListKind = Literal["central_nsq", "state_nsq", "spurious", "mixed", "other"]   # mixed = NSQ + spurious rows
 MatchLevel = Literal["HIGH", "MEDIUM", "LOW"]
 AlertStatus = Literal["new", "confirmed", "dismissed"]
 Severity = Literal["CRITICAL", "HIGH", "MODERATE", "LOW"]
@@ -26,6 +26,7 @@ class NSQEntry(BaseModel):
     manufacturer: str = ""
     result: str = ""            # which test it failed ("Sterility", "Assay of ...")
     reported_by: str = ""       # lab / state that tested it
+    spurious: bool = False      # this row is a fake/falsified product (not just failed a test)
 
 
 class NSQList(BaseModel):
