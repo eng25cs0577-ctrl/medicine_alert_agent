@@ -41,6 +41,13 @@ def _check_access(code: str | None) -> None:
         raise HTTPException(status_code=401, detail="Wrong access code.")
 
 
+def _check_access_or_token(code: str | None, token: str | None) -> None:
+    """Pharmacist (access code) or an automated helper (CHECK_TOKEN: daily job, laptop sync)."""
+    if settings.check_token and token and secrets.compare_digest(token, settings.check_token):
+        return
+    _check_access(code)
+
+
 def _start_check(source: str) -> dict:
     from pipeline import run_check
 
@@ -147,6 +154,14 @@ def list_entries(list_id: int, x_access_code: str | None = Header(default=None))
     return storage.get_entries(list_id)
 
 
+@app.get("/api/lists/sources")
+def list_sources(x_access_code: str | None = Header(default=None),
+                 x_check_token: str | None = Header(default=None)) -> list[str]:
+    """CDSCO links of the lists already stored, so the laptop sync skips them."""
+    _check_access_or_token(x_access_code, x_check_token)
+    return [l["source_url"] for l in storage.get_lists() if l.get("source_url")]
+
+
 @app.delete("/api/lists/{list_id}")
 def delete_list(list_id: int, x_access_code: str | None = Header(default=None)) -> dict:
     _check_access(x_access_code)
@@ -156,9 +171,12 @@ def delete_list(list_id: int, x_access_code: str | None = Header(default=None)) 
 
 
 @app.post("/api/lists/upload")
-async def upload_list(request: Request, title: str = "", x_access_code: str | None = Header(default=None)) -> dict:
-    """Body: the PDF file itself (Content-Type: application/pdf). Then re-checks the inventory."""
-    _check_access(x_access_code)
+async def upload_list(request: Request, title: str = "", source_url: str = "", released: str = "",
+                      check: bool = True, x_access_code: str | None = Header(default=None),
+                      x_check_token: str | None = Header(default=None)) -> dict:
+    """Body: the PDF file itself (Content-Type: application/pdf). Then re-checks the inventory
+    (check=false lets the laptop sync upload several lists and start one check at the end)."""
+    _check_access_or_token(x_access_code, x_check_token)
     from pipeline import import_pdf_bytes
 
     data = await request.body()
@@ -166,10 +184,10 @@ async def upload_list(request: Request, title: str = "", x_access_code: str | No
         raise HTTPException(status_code=422, detail="That file is not a PDF.")
     if len(data) > MAX_PDF_BYTES:
         raise HTTPException(status_code=413, detail="PDF is too large (max 15 MB).")
-    result = import_pdf_bytes(data, title=title)
+    result = import_pdf_bytes(data, title=title[:300], source_url=source_url[:500], released=released[:40])
     if result["status"] == "empty":
         raise HTTPException(status_code=422, detail="No table rows found - is this a CDSCO NSQ/spurious list?")
-    if result["status"] == "imported" and not _running.is_set():
+    if check and result["status"] == "imported" and not _running.is_set():
         _start_check("none")
     return result
 
@@ -199,9 +217,7 @@ def decide(alert_id: int, d: Decision, x_access_code: str | None = Header(defaul
 def check(source: Literal["cdsco", "none"] = "cdsco", x_access_code: str | None = Header(default=None),
           x_check_token: str | None = Header(default=None)) -> dict:
     """Start a check: from the website (access code) or the daily scheduler (check token)."""
-    if not (settings.check_token and x_check_token
-            and secrets.compare_digest(x_check_token, settings.check_token)):
-        _check_access(x_access_code)
+    _check_access_or_token(x_access_code, x_check_token)
     return _start_check(source)
 
 

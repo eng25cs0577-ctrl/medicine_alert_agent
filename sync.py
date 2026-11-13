@@ -1,0 +1,236 @@
+"""MedAlert laptop sync: download new CDSCO lists on a computer in India, upload them
+to your MedAlert website, then start one check of your stock.
+
+Why: the CDSCO website often blocks servers outside India (like Render's), but it
+opens fine from a laptop in India.
+
+Needs only a normal Python 3.8+ install (standard library only - no pip install).
+
+    python sync.py                 # first run asks for your site address and check token
+    python sync.py --dry-run       # show what would be uploaded, upload nothing
+    python sync.py --max 3         # upload at most 3 new lists this time
+
+Settings are read from (first found): command-line options, environment variables
+SITE_URL / CHECK_TOKEN, or the file sync.env next to this script.
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import os
+import ssl
+import sys
+import time
+import urllib.error
+import urllib.parse
+import urllib.request
+from pathlib import Path
+
+from cdsco_page import USER_AGENT, AlertLink, parse_alerts_page
+
+HERE = Path(__file__).resolve().parent
+ENV_FILE = HERE / "sync.env"
+LOG_FILE = HERE / "sync.log"
+DEFAULT_PAGES = ["https://cdsco.gov.in/opencms/opencms/en/Alerts/"]
+
+
+# ------------------------------- output ------------------------------------ #
+def say(msg: str) -> None:
+    line = f"{time.strftime('%Y-%m-%d %H:%M:%S')}  {msg}"
+    print(line, flush=True)
+    try:
+        with LOG_FILE.open("a", encoding="utf-8") as f:
+            f.write(line + "\n")
+    except OSError:
+        pass
+
+
+# ------------------------------ settings ----------------------------------- #
+def read_env_file(path: Path) -> dict:
+    values = {}
+    if path.exists():
+        for raw in path.read_text(encoding="utf-8-sig").splitlines():
+            line = raw.strip()
+            if line and not line.startswith("#") and "=" in line:
+                key, _, value = line.partition("=")
+                values[key.strip()] = value.split(" #")[0].strip().strip('"').strip("'")
+    return values
+
+
+def load_settings(args) -> dict:
+    file_values = read_env_file(ENV_FILE)
+    site = args.site or os.getenv("SITE_URL") or file_values.get("SITE_URL", "")
+    token = args.token or os.getenv("CHECK_TOKEN") or file_values.get("CHECK_TOKEN", "")
+    pages = args.page or [p.strip() for p in
+                          (os.getenv("CDSCO_PAGES") or file_values.get("CDSCO_PAGES", "")).split(",") if p.strip()]
+    if (not site or not token) and sys.stdin.isatty() and not args.quiet:
+        print("First-time setup (saved in sync.env next to this script).")
+        site = site or input("Your MedAlert website address (e.g. https://medicine-alert-agent.onrender.com): ").strip()
+        token = token or input("Your CHECK_TOKEN (the same as in Render's Environment): ").strip()
+        if site and token:
+            ENV_FILE.write_text(f"SITE_URL={site}\nCHECK_TOKEN={token}\n", encoding="utf-8")
+            say(f"saved settings to {ENV_FILE.name}")
+    if not site or not token:
+        raise SystemExit("Missing SITE_URL or CHECK_TOKEN. Run once by double-clicking sync_cdsco.bat, "
+                         "or create sync.env from sync.env.example.")
+    return {"site": site.rstrip("/"), "token": token, "pages": pages or DEFAULT_PAGES}
+
+
+# -------------------------------- HTTP ------------------------------------- #
+def http(url: str, *, data: bytes | None = None, headers: dict | None = None, method: str | None = None,
+         timeout: float = 60, context: ssl.SSLContext | None = None) -> tuple[int, bytes]:
+    req = urllib.request.Request(url, data=data, method=method,
+                                 headers={"User-Agent": USER_AGENT, **(headers or {})})
+    try:
+        with urllib.request.urlopen(req, timeout=timeout, context=context) as r:
+            return r.status, r.read()
+    except urllib.error.HTTPError as e:
+        return e.code, e.read()
+
+
+def site_call(cfg: dict, path: str, *, data: bytes | None = None, content_type: str = "",
+              method: str = "GET", timeout: float = 120) -> tuple[int, dict | list]:
+    headers = {"X-Check-Token": cfg["token"]}
+    if content_type:
+        headers["Content-Type"] = content_type
+    code, body = http(cfg["site"] + path, data=data, headers=headers, method=method, timeout=timeout)
+    try:
+        return code, json.loads(body or b"null")
+    except json.JSONDecodeError:
+        return code, {"detail": body[:200].decode("utf-8", "replace")}
+
+
+def wake_site(cfg: dict) -> None:
+    """Free hosts sleep; the first request can take ~1 minute."""
+    for attempt in range(1, 7):
+        try:
+            code, _ = http(cfg["site"] + "/healthz", timeout=60)
+            if code == 200:
+                return
+        except (urllib.error.URLError, OSError) as exc:
+            say(f"  website not answering yet ({exc.__class__.__name__}), attempt {attempt}/6")
+        time.sleep(15)
+    raise SystemExit(f"Your website {cfg['site']} did not answer. Check the address and that Render shows Live.")
+
+
+def cdsco_get(url: str, insecure: bool) -> bytes:
+    context = None
+    if insecure:   # only for public CDSCO files, and only when you pass --insecure-cdsco
+        context = ssl.create_default_context()
+        context.check_hostname = False
+        context.verify_mode = ssl.CERT_NONE
+    code, body = http(url, timeout=90, context=context)
+    if code != 200:
+        raise OSError(f"HTTP {code}")
+    return body
+
+
+# --------------------------------- main ------------------------------------ #
+def find_new_lists(cfg: dict, known: set[str], insecure: bool) -> list[AlertLink]:
+    links: list[AlertLink] = []
+    for page in cfg["pages"]:
+        try:
+            html_text = cdsco_get(page, insecure).decode("utf-8", "replace")
+        except ssl.SSLError as exc:
+            raise SystemExit(f"Secure connection to CDSCO failed ({exc}). If cdsco.gov.in opens in your "
+                             "browser, run again with --insecure-cdsco (only CDSCO downloads skip the check).")
+        except (urllib.error.URLError, OSError) as exc:
+            raise SystemExit(f"Could not open {page} ({exc}). Is this computer online, and does the page "
+                             "open in your browser?")
+        found = parse_alerts_page(html_text, page)
+        say(f"CDSCO page {page}: {len(found)} drug-alert lists")
+        links.extend(found)
+    seen, new = set(known), []
+    for link in links:
+        if link.url not in seen:
+            seen.add(link.url)
+            new.append(link)
+    return new
+
+
+def start_check(cfg: dict) -> None:
+    for attempt in range(1, 13):                      # wait up to ~6 minutes if one is running
+        code, body = site_call(cfg, "/api/check?source=none", method="POST")
+        if code == 200:
+            say("Started a check of your stock - see the Alerts page in a few minutes.")
+            return
+        if code == 409:
+            if attempt == 1:
+                say("A check is already running on the website; waiting for it to finish...")
+            time.sleep(30)
+            continue
+        raise SystemExit(f"Could not start the check (HTTP {code}): {body}")
+    say("A check was still running after 6 minutes; the uploaded lists will be checked next time.")
+
+
+def main(argv: list[str] | None = None) -> int:
+    p = argparse.ArgumentParser(description="Download new CDSCO lists here and upload them to MedAlert.")
+    p.add_argument("--site", help="your MedAlert address, e.g. https://medicine-alert-agent.onrender.com")
+    p.add_argument("--token", help="your CHECK_TOKEN")
+    p.add_argument("--page", action="append", help="CDSCO page to read (can repeat); default: the Alerts page")
+    p.add_argument("--max", type=int, default=6, help="upload at most this many new lists per run (default 6)")
+    p.add_argument("--dry-run", action="store_true", help="only show what would be uploaded")
+    p.add_argument("--quiet", action="store_true", help="never ask questions (for Task Scheduler)")
+    p.add_argument("--insecure-cdsco", action="store_true",
+                   help="skip HTTPS certificate checks for CDSCO downloads only (if CDSCO's certificate fails)")
+    args = p.parse_args(argv)
+
+    cfg = load_settings(args)
+    say(f"MedAlert sync -> {cfg['site']}")
+    wake_site(cfg)
+    code, known = site_call(cfg, "/api/lists/sources")
+    if code == 401:
+        raise SystemExit("The website rejected the CHECK_TOKEN. Copy it again from Render -> Environment "
+                         "into sync.env.")
+    if code != 200:
+        raise SystemExit(f"Website error (HTTP {code}): {known}")
+    say(f"website already has {len(known)} CDSCO list(s)")
+
+    new = find_new_lists(cfg, set(known), args.insecure_cdsco)
+    if not new:
+        say("No new lists on CDSCO. Nothing to do.")
+        return 0
+    todo = new[: max(1, args.max)]
+    say(f"{len(new)} new list(s) on CDSCO; handling {len(todo)} now (newest first)")
+    uploaded = 0
+    for link in todo:
+        say(f"- {link.title} ({link.released or 'no date'})")
+        if args.dry_run:
+            continue
+        try:
+            pdf = cdsco_get(link.url, args.insecure_cdsco)
+        except (urllib.error.URLError, OSError, ssl.SSLError) as exc:
+            say(f"  download failed: {exc}")
+            continue
+        if not pdf.startswith(b"%PDF"):
+            say("  skipped: the link did not return a PDF")
+            continue
+        query = urllib.parse.urlencode({"title": link.title, "source_url": link.url,
+                                        "released": link.released, "check": "false"})
+        code, result = site_call(cfg, f"/api/lists/upload?{query}", data=pdf,
+                                 content_type="application/pdf", method="POST", timeout=180)
+        if code == 200 and isinstance(result, dict):
+            status = result.get("status")
+            if status == "imported":
+                uploaded += 1
+                say(f"  uploaded: {result.get('entries')} entries ({result.get('kind')}, {result.get('month') or '?'})")
+            else:
+                say(f"  {status}: already on the website")
+        else:
+            detail = result.get("detail") if isinstance(result, dict) else result
+            say(f"  not imported (HTTP {code}): {detail}")
+    if args.dry_run:
+        say("Dry run: nothing was uploaded.")
+        return 0
+    if uploaded:
+        start_check(cfg)
+    say(f"Done: {uploaded} new list(s) uploaded.")
+    return 0
+
+
+if __name__ == "__main__":
+    try:
+        sys.exit(main())
+    except KeyboardInterrupt:
+        sys.exit(130)

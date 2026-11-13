@@ -32,6 +32,7 @@ MAX_CANDIDATES = 5          # per inventory item in one AutoGen review
 
 class CheckState(TypedDict, total=False):
     source: str             # "cdsco" (download new lists) or "none" (use stored lists only)
+    cdsco_blocked: bool
     notes: list[str]
     imported: list[dict]
     matches: list[dict]
@@ -75,8 +76,8 @@ def fetch_lists(state: CheckState) -> dict:
         links = find_lists()
     except Exception as exc:  # noqa: BLE001 - e.g. the site blocks servers outside India
         notes = _note({"notes": notes}, f"fetch_lists: could not reach CDSCO ({str(exc)[:120]}). "
-                      "Upload the PDF on the Lists page instead.")
-        return {"imported": [], "notes": notes}
+                      "Use the laptop sync helper (sync.py) or upload the PDF on the Lists page.")
+        return {"imported": [], "notes": notes, "cdsco_blocked": True}
     for link in links[:MAX_NEW_LISTS * 3]:
         if len(imported) >= MAX_NEW_LISTS:
             break
@@ -244,6 +245,8 @@ def run_check(source: str = "cdsco", on_line: Callable[[dict], None] | None = No
         final = build_graph().invoke({"source": source, "notes": []})
         summary = (f"{len(final.get('imported', []))} new list(s), "
                    f"{len(final.get('saved', []))} new alert(s)")
+        if final.get("cdsco_blocked"):
+            summary += " - CDSCO can't be reached from this server: use the laptop sync or upload the PDF"
         storage.finish_run(run_id, "done", summary, capture.lines)
         return {"run_id": run_id, "status": "done", "summary": summary,
                 "imported": final.get("imported", []), "new_alerts": final.get("saved", [])}

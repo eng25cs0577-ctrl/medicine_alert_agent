@@ -148,13 +148,65 @@ python main.py alerts
    (your Render address) and `CHECK_TOKEN` (the same value as on Render).
    `.github/workflows/daily-check.yml` then wakes the site and starts a check
    every day at 10:00 IST. You can also start it from **Actions → Run workflow**.
-3. **If the CDSCO site blocks Render's servers**, which can happen because the
-   servers are outside India, the check logs "could not reach CDSCO". Download
-   the PDF from https://cdsco.gov.in/opencms/opencms/en/Alerts/ and use
-   **CDSCO lists → Upload a CDSCO PDF**. If you know the address of the newer
-   "NSQ Alerts" page, set it as `CDSCO_NSQ_URL`.
+3. **If the CDSCO site blocks Render's servers** (very likely, since they're
+   outside India), the check logs "could not reach CDSCO". Use the **laptop sync**
+   below, or download the PDF from https://cdsco.gov.in/opencms/opencms/en/Alerts/
+   and use **CDSCO lists → Upload a CDSCO PDF**.
 
 ---
+
+## Laptop sync: get CDSCO lists when the site blocks your server
+
+CDSCO's website often blocks servers outside India, and Render's servers are in
+Singapore/US (Activity shows *"could not reach CDSCO … Network is unreachable"*).
+It opens fine from a computer **in India**. `sync.py` runs on your laptop and:
+
+1. reads the CDSCO Alerts page and finds the NSQ and spurious lists;
+2. asks your website which lists it already has, and downloads only the new ones;
+3. uploads them to your website (using your `CHECK_TOKEN`), then starts **one** check.
+
+It needs only a normal Python install (standard library only, no `pip install`).
+
+### One-time setup (Windows)
+
+1. Download the project: on GitHub click **Code → Download ZIP**, then unzip it,
+   e.g. to `C:\MedAlert`. You need `sync.py`, `cdsco_page.py` and `sync_cdsco.bat`.
+2. Double-click **`sync_cdsco.bat`**. The first time, it asks for:
+   - your website address, e.g. `https://medicine-alert-agent.onrender.com`
+   - your `CHECK_TOKEN` (the same value as in Render → Environment)
+
+   It saves both in `sync.env` next to the script, and never uploads that file.
+3. It shows each list it uploads; press a key to close. Then open your website's
+   **Alerts** page.
+
+Useful options: `py sync.py --dry-run` shows what would be uploaded, and
+`py sync.py --max 3` uploads at most 3 lists. If the CDSCO certificate fails
+on your computer but the site opens in your browser, use `--insecure-cdsco`,
+which skips the certificate check for CDSCO downloads only.
+
+### Run it automatically every day (Task Scheduler)
+
+Unzip to a folder **without spaces** in its path (e.g. `C:\MedAlert`), open
+**PowerShell** and run:
+
+```powershell
+schtasks /Create /SC DAILY /ST 10:15 /TN "MedAlert CDSCO sync" /TR "C:\MedAlert\sync_cdsco.bat --quiet"
+```
+
+If you'd rather click through it: open **Task Scheduler** → **Create Basic Task** →
+name it *MedAlert CDSCO sync* → **Daily**, 10:15 → **Start a program** → Program:
+`C:\MedAlert\sync_cdsco.bat`, Arguments: `--quiet`, Start in: `C:\MedAlert` →
+**Finish**.
+
+It runs every day at 10:15 whenever the laptop is on. If the laptop was off,
+it simply runs the next day; nothing is lost, because new lists stay on CDSCO.
+Each run's output is appended to `sync.log`.
+
+To remove the scheduled task:
+
+```powershell
+schtasks /Delete /TN "MedAlert CDSCO sync" /F
+```
 
 ## Tests (offline, no AI key or internet needed)
 
@@ -185,7 +237,10 @@ review_team.py     AutoGen Matcher vs Sceptic review of uncertain matches
 alert_crew.py      CrewAI Risk Assessor + Notice Writer; rule-based severity and draft
 nsq_parser.py      Exact reading of CDSCO NSQ/spurious PDFs (pdfplumber)
 matching.py        Inventory vs list matching (names, strengths, makers, batches)
-cdsco.py           Finds and downloads new lists from the CDSCO Alerts page
+cdsco.py           Finds and downloads new lists from the CDSCO Alerts page (server side)
+cdsco_page.py      Reads the CDSCO Alerts page table (standard library only)
+sync.py            Laptop sync helper: CDSCO (from India) -> your website
+sync_cdsco.bat     Double-click launcher for sync.py on Windows
 storage.py         PostgreSQL (DATABASE_URL) or SQLite: lists, entries, inventory, alerts, runs
 config.py          Shared settings, logging, retries, backup-provider switch
 models.py          Pydantic contracts shared by all parts

@@ -4,3 +4,5 @@
 __pycache__
 data
 tests
+sync.env
+sync.log
