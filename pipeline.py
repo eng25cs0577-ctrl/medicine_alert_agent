@@ -53,11 +53,17 @@ def import_pdf_bytes(data: bytes, title: str = "", source_url: str = "", release
 
     digest = file_hash(data)
     if storage.list_exists(digest):
+        if source_url:
+            storage.set_source_if_missing(digest, source_url, released)
         return {"status": "duplicate", "title": title}
     with tempfile.NamedTemporaryFile(suffix=".pdf") as f:
         f.write(data)
         f.flush()
-        lst = parse_pdf(f.name, title=title, source_url=source_url, released=released)
+        try:
+            lst = parse_pdf(f.name, title=title, source_url=source_url, released=released)
+        except Exception as exc:  # noqa: BLE001 - a damaged PDF is "unreadable", not a server error
+            log.warning("could not read %r: %s", title[:60], exc)
+            return {"status": "empty", "title": title}
     if not lst.entries:
         return {"status": "empty", "title": lst.title}
     list_id = storage.save_list(lst, digest)

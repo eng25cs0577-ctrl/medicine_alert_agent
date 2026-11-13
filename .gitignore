@@ -7,3 +7,4 @@ data/
 sync.env
 sync.log
 sync_debug_*.html
+sync_state.json

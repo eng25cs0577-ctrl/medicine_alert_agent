@@ -163,7 +163,9 @@ It opens fine from a computer **in India**. `sync.py` runs on your laptop and:
 
 1. reads the CDSCO Alerts page and finds the NSQ and spurious lists;
 2. asks your website which lists it already has, and downloads only the new ones;
-3. uploads them to your website (using your `CHECK_TOKEN`), then starts **one** check.
+3. uploads them to your website (using your `CHECK_TOKEN`), then starts **one** check;
+4. remembers lists the website already had or couldn't read (in `sync_state.json`),
+   so each run moves on to new lists instead of retrying the same ones.
 
 It needs only a normal Python install (standard library only, no `pip install`).
 
@@ -179,8 +181,9 @@ It needs only a normal Python install (standard library only, no `pip install`).
 3. It shows each list it uploads; press a key to close. Then open your website's
    **Alerts** page.
 
-Useful options: `py sync.py --dry-run` shows what would be uploaded, and
-`py sync.py --max 3` uploads at most 3 lists. If the CDSCO certificate fails
+Useful options: `py sync.py --dry-run` shows what would be uploaded,
+`py sync.py --max 3` uploads at most 3 lists, and `py sync.py --retry-skipped`
+tries again the lists earlier runs couldn't read (useful after a website update). If the CDSCO certificate fails
 on your computer but the site opens in your browser, use `--insecure-cdsco`,
 which skips the certificate check for CDSCO downloads only.
 
@@ -218,9 +221,11 @@ pip install -r requirements-dev.txt
 pytest -q
 ```
 
-The tests use two **real CDSCO PDFs** (June 2025: 130 state-lab entries and 55
-central-lab entries) in `tests/fixtures/`. They cover:
-- exact parsing of both PDFs,
+The tests use four **real CDSCO PDFs** in `tests/fixtures/`: the June 2025 NSQ
+lists (130 state-lab and 55 central-lab entries), the June 2025 spurious-drug list
+(4 entries) and the revised May 2025 drug alert. They cover:
+- exact parsing of all four PDFs, including the spurious-list layout (merged cells,
+  names split over several rows, "Under Investigation" instead of a maker),
 - matching rules,
 - the AutoGen debate (with scripted model replies),
 - CrewAI drafting,
@@ -235,7 +240,7 @@ static/index.html  Single-page UI: overview, alerts, inventory, lists, check a m
 pipeline.py        LangGraph orchestrator; import_pdf_bytes(); run_check()
 review_team.py     AutoGen Matcher vs Sceptic review of uncertain matches
 alert_crew.py      CrewAI Risk Assessor + Notice Writer; rule-based severity and draft
-nsq_parser.py      Exact reading of CDSCO NSQ/spurious PDFs (pdfplumber)
+nsq_parser.py      Exact reading of CDSCO NSQ, spurious and revised drug-alert PDFs (pdfplumber)
 matching.py        Inventory vs list matching (names, strengths, makers, batches)
 cdsco.py           Finds and downloads new lists from the CDSCO Alerts page (server side)
 cdsco_page.py      Reads the CDSCO Alerts page table (standard library only)

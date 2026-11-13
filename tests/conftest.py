@@ -8,6 +8,8 @@ sys.path.insert(0, str(ROOT))
 FIXTURES = ROOT / "tests" / "fixtures"
 STATE_PDF = FIXTURES / "state_nsq_june_2025.pdf"
 CENTRAL_PDF = FIXTURES / "cdsco_nsq_june_2025.pdf"
+SPURIOUS_PDF = FIXTURES / "spurious_june_2025.pdf"
+REVISED_PDF = FIXTURES / "revised_alert_may_2025.pdf"
 
 
 @pytest.fixture
