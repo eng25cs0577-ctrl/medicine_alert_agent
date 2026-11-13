@@ -58,6 +58,14 @@ class _TableParser(HTMLParser):
             self._cells = None
 
 
+def clean_url(url: str) -> str:
+    """CDSCO's HTML wraps long links over several lines, so an href can contain line
+    breaks or tabs; Python refuses such addresses. Drop control characters and encode
+    any remaining spaces."""
+    url = re.sub(r"[\x00-\x1f\x7f]", "", html.unescape(url or "")).strip()
+    return url.replace(" ", "%20")
+
+
 def parse_alerts_page(page_html: str, base_url: str) -> list[AlertLink]:
     parser = _TableParser()
     parser.feed(page_html)
@@ -69,6 +77,9 @@ def parse_alerts_page(page_html: str, base_url: str) -> list[AlertLink]:
         if not _LIST_RE.search(title) or _NOT_A_LIST_RE.search(title):
             continue
         released = next((c for c in cells if re.match(r"^\d{4}-[A-Za-z]{3}-\d{1,2}$", c)), "")
+        links = [clean_url(l) for l in links if clean_url(l) and not clean_url(l).lower().startswith("javascript:")]
+        if not links:
+            continue
         pdf = next((l for l in links if "download" in l.lower() or l.lower().endswith(".pdf")), links[0])
         out.append(AlertLink(title=title, released=released, url=urllib.parse.urljoin(base_url, pdf)))
     return out
