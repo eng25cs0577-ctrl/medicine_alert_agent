@@ -29,5 +29,12 @@ jobs:
             if curl -fsS --max-time 60 "$SITE_URL/healthz"; then break; fi
             echo "site waking up... ($i)"; sleep 20
           done
-          curl -fsS --max-time 60 -X POST -H "X-Check-Token: $CHECK_TOKEN" "$SITE_URL/api/check?source=cdsco"
-          echo; echo "Check started."
+          code=$(curl -sS --max-time 60 -o response.txt -w "%{http_code}" -X POST \
+                 -H "X-Check-Token: $CHECK_TOKEN" "$SITE_URL/api/check?source=cdsco")
+          cat response.txt; echo
+          case "$code" in
+            200) echo "Check started." ;;
+            409) echo "::notice::A check is already running on the site - nothing to do." ;;
+            401) echo "::error::CHECK_TOKEN in GitHub doesn't match CHECK_TOKEN on the server."; exit 1 ;;
+            *)   echo "::error::The site answered HTTP $code."; exit 1 ;;
+          esac
