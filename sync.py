@@ -306,8 +306,18 @@ def main(argv: list[str] | None = None) -> int:
             continue
         query = urllib.parse.urlencode({"title": link.title, "source_url": link.url,
                                         "released": link.released, "check": "false"})
-        code, result = site_call(cfg, f"/api/lists/upload?{query}", data=pdf,
-                                 content_type="application/pdf", method="POST", timeout=180)
+        try:
+            code, result = site_call(cfg, f"/api/lists/upload?{query}", data=pdf,
+                                     content_type="application/pdf", method="POST", timeout=180)
+        except (TimeoutError, OSError) as exc:   # one slow upload must not stop the other lists
+            if isinstance(exc, TimeoutError) or "timed out" in str(exc):
+                handled[link.url] = "unreadable"
+                save_state(handled)
+                say("  upload timed out: the website took over 3 minutes to read this PDF "
+                    "(very large?). Skipped from now on; --retry-skipped tries it again.")
+            else:
+                say(f"  upload failed: {exc.__class__.__name__}: {str(exc)[:200]} (will retry next run)")
+            continue
         if code == 200 and isinstance(result, dict):
             status = result.get("status")
             if status == "imported":

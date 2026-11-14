@@ -191,3 +191,42 @@ def test_clean_url_removes_line_breaks():
            '<td><a href="/opencms/download_file_division.jsp?num_id=\nMTI5Mjc">p</a></td></tr></table>'
     [link] = parse_alerts_page(html, "https://cdsco.gov.in/opencms/opencms/en/Alerts/")
     assert link.url == "https://cdsco.gov.in/opencms/download_file_division.jsp?num_id=MTI5Mjc"
+
+
+def test_clean_url_encodes_long_dash():
+    """Regression from the live CDSCO site: a file name with '–' crashed the download."""
+    from cdsco_page import clean_url
+    assert clean_url("/f/Spurious Nov–2024.pdf") == "/f/Spurious%20Nov%E2%80%932024.pdf"
+    assert clean_url("/x.jsp?num_id=MTIyOTE=") == "/x.jsp?num_id=MTIyOTE="
+
+
+def test_reports_are_not_lists():
+    from cdsco_page import parse_alerts_page
+    page = ("<table><tr><td>1</td><td>Report on countrywide survey for Spurious Drugs</td><td>2010-Feb-24</td>"
+            "<td><a href='/r.pdf'>p</a></td></tr></table>")
+    assert parse_alerts_page(page, "https://cdsco.gov.in/") == []
+
+
+def test_upload_timeout_skips_list_and_continues(monkeypatch, tmp_path):
+    import sync
+    from cdsco_page import AlertLink
+    for name in ("LOG_FILE", "STATE_FILE"):
+        monkeypatch.setattr(sync, name, tmp_path / name.lower())
+    links = [AlertLink("Big report spurious", "", "https://c/big"), AlertLink("NSQ list", "", "https://c/ok")]
+    monkeypatch.setattr(sync, "load_settings", lambda a: {"site": "https://s", "token": "t", "pages": []})
+    monkeypatch.setattr(sync, "wake_site", lambda cfg: None)
+    monkeypatch.setattr(sync, "find_new_lists", lambda cfg, known, client: links)
+    monkeypatch.setattr(sync, "start_check", lambda cfg: None)
+    monkeypatch.setattr(sync.CDSCOClient, "pdf", lambda self, url: (b"%PDF-1.4", "application/pdf", b""))
+
+    def site_call(cfg, path, **kw):
+        if path == "/api/lists/sources":
+            return 200, []
+        if "big" in path:
+            raise TimeoutError("The read operation timed out")
+        return 200, {"status": "imported", "entries": 3, "kind": "central_nsq", "month": "2025-01"}
+    monkeypatch.setattr(sync, "site_call", site_call)
+    assert sync.main(["--quiet"]) == 0
+    log = (tmp_path / "log_file").read_text()
+    assert "upload timed out" in log and "Done: 1 new list(s) uploaded." in log
+    assert sync.load_state() == {"https://c/big": "unreadable"}

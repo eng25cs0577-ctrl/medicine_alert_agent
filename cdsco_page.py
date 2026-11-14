@@ -15,7 +15,8 @@ from html.parser import HTMLParser
 USER_AGENT = ("Mozilla/5.0 (compatible; MedAlert-student-project/1.0; "
               "+https://github.com/eng25cs0577-ctrl/medicine_alert_agent)")
 _LIST_RE = re.compile(r"\b(nsq|not\s+of\s+standard\s+quality|spurious|drug\s+alert)\b", re.I)
-_NOT_A_LIST_RE = re.compile(r"\b(availability|new\s+link|corrigendum|theft|circular)\b", re.I)
+# Notices and one-off reports, not monthly lists (e.g. "Report on countrywide survey for Spurious Drugs")
+_NOT_A_LIST_RE = re.compile(r"\b(availability|new\s+link|corrigendum|theft|circular|survey|report\s+on)\b", re.I)
 
 
 _MOJIBAKE_RE = re.compile(r"[\u00c2-\u00f4][\u0080-\u00bf\u0152-\u2122]{1,3}")
@@ -86,10 +87,11 @@ class _TableParser(HTMLParser):
 
 def clean_url(url: str) -> str:
     """CDSCO's HTML wraps long links over several lines, so an href can contain line
-    breaks or tabs; Python refuses such addresses. Drop control characters and encode
-    any remaining spaces."""
+    breaks or tabs, and some file names contain spaces or a long dash ('–'); Python
+    refuses such addresses. Drop control characters, encode spaces and other characters."""
     url = re.sub(r"[\x00-\x1f\x7f]", "", html.unescape(url or "")).strip()
-    return url.replace(" ", "%20")
+    url = url.replace(" ", "%20")
+    return re.sub(r"[^\x00-\x7f]+", lambda m: urllib.parse.quote(m.group(0)), url)
 
 
 def parse_alerts_page(page_html: str, base_url: str) -> list[AlertLink]:
