@@ -66,6 +66,7 @@ def normalize_batch(text: str) -> str:
     return re.sub(r"\s+", "", text or "").strip(" .,;").upper()
 
 
+MAX_PAGES = 60      # monthly lists are 1-30 pages; bigger PDFs are reports
 PARSER_VERSION = 2   # 2: spurious rows marked one by one. Older lists are re-read by the laptop sync.
 _SPURIOUS_ROW = re.compile(r"(?<!not )(?<!not a )\bspurious\b", re.I)
 
@@ -193,6 +194,9 @@ def parse_pdf(path: str | Path, title: str = "", source_url: str = "", released:
     rows: list[list[str | None]] = []
     first_text = ""
     with pdfplumber.open(str(path)) as pdf:
+        if len(pdf.pages) > MAX_PAGES:              # a report, not a monthly list: too slow for a small server
+            log.warning("%s has %d pages (over %d): not read as a list", Path(path).name, len(pdf.pages), MAX_PAGES)
+            return NSQList(title=title or Path(path).stem, source_url=source_url, released=released)
         for i, page in enumerate(pdf.pages):
             if i == 0:
                 first_text = page.extract_text() or ""
